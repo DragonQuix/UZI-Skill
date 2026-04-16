@@ -223,7 +223,7 @@ def _holding_quarters(ticker_code: str, fund_code: str, max_lookback: int = 8) -
     return count, trend
 
 
-def main(ticker: str, limit: int = 10) -> dict:
+def main(ticker: str, limit: int = 50) -> dict:
     ti = parse_ticker(ticker)
     if ti.market != "A":
         return {

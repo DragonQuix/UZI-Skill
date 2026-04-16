@@ -1769,8 +1769,27 @@ def render_fund_managers(managers: list) -> str:
 </div>'''
         cards.append(card)
 
-    header = f'<div class="fund-mgr-header">✨ <strong>{len(managers)} 位公募基金经理</strong>持有本股 · 按 5 年收益排序 · 你可以直接"抄作业"</div>'
-    return header + f'<div class="fund-mgr-grid">{"".join(cards)}</div>'
+    header = f'<div class="fund-mgr-header">✨ <strong>{len(managers)} 位公募基金经理</strong>持有本股 · 按 5 年累计收益排序 · 你可以直接"抄作业"</div>'
+
+    INITIAL_SHOW = 6
+    if len(cards) <= INITIAL_SHOW:
+        return header + f'<div class="fund-mgr-grid">{"".join(cards)}</div>'
+
+    # Show first 6, hide rest behind expand button
+    visible = "".join(cards[:INITIAL_SHOW])
+    hidden = "".join(cards[INITIAL_SHOW:])
+    hidden_count = len(cards) - INITIAL_SHOW
+    uid = f"fm_{abs(hash(str(len(cards))))}"
+
+    return header + f'''
+    <div class="fund-mgr-grid">{visible}</div>
+    <div id="{uid}" class="fund-mgr-grid" style="display:none">{hidden}</div>
+    <div style="text-align:center;margin:16px 0">
+      <button onclick="var el=document.getElementById('{uid}');var btn=this;if(el.style.display==='none'){{el.style.display='grid';btn.textContent='收起 ▲'}}else{{el.style.display='none';btn.textContent='展开剩余 {hidden_count} 位基金经理 ▼'}}"
+        style="background:#f59e0b;color:#fff;border:none;padding:10px 28px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;transition:all 0.2s">
+        展开剩余 {hidden_count} 位基金经理 ▼
+      </button>
+    </div>'''
 
 
 def render_debate_rounds(debate: dict) -> str:
