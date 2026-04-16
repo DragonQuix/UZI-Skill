@@ -123,5 +123,5 @@ def quick_summary(query: str, max_snippets: int = 3) -> dict:
 if __name__ == "__main__":
     import json
     import sys
-    q = sys.argv[1] if len(sys.argv) > 1 else "水晶光电 AR 眼镜 订单 2026"
+    q = sys.argv[1] if len(sys.argv) > 1 else "贵州茅台 白酒 行业分析"
     print(json.dumps(quick_summary(q), ensure_ascii=False, indent=2))

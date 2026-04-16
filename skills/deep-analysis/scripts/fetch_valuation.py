@@ -116,7 +116,7 @@ def main(ticker: str) -> dict:
                         symbol="证监会行业分类", date=d.strftime("%Y%m%d")
                     )
                     if df is not None and not df.empty:
-                        # Find industry row containing 水晶光电's industry (contains keyword)
+                        # Find industry row matching the target company's industry
                         ind_name = basic.get("industry") or ""
                         # Light matching - look for any of ind_name's chars
                         matches = df[df["行业名称"].astype(str).str.contains(ind_name[:2], na=False)] if ind_name else df.iloc[:0]
