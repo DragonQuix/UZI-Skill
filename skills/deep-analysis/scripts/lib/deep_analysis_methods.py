@@ -231,7 +231,7 @@ def build_unit_economics(features: dict, raw_data: dict) -> dict:
     fin = (dims.get("1_financials") or {}).get("data") or {}
     industry = dims.get("0_basic", {}).get("data", {}).get("industry", "")
 
-    is_recurring = any(kw in industry for kw in ["软件", "服务", "云", "互联网", "SaaS"])
+    is_recurring = any(kw in (industry or "") for kw in ["软件", "服务", "云", "互联网", "SaaS"])
 
     if is_recurring:
         # SaaS-style cohort metrics
