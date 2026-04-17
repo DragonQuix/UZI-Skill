@@ -646,16 +646,21 @@ def test_stage1_early_exits_on_etf():
 
 
 # ─── v2.10.1 · 性能优化：lite mode + ddgs 预算 + fund_holders 默认 20 ──
-def test_fund_holders_default_limit_capped():
-    """v2.10.1 · wave3 默认 limit=20 而不是 None（保护首次安装/Codex）"""
-    src = (SCRIPTS_DIR / "run_real_test.py").read_text(encoding="utf-8")
-    idx = src.find("def _fund_holders")
-    snippet = src[idx:idx + 1200]
-    assert "UZI_FUND_LIMIT" in snippet, \
-        "v2.10.1 regression: wave3 必须支持 UZI_FUND_LIMIT 环境变量"
-    # 默认不应该是 None
-    assert '"20"' in snippet or "= 20" in snippet, \
-        "v2.10.1 regression: UZI_FUND_LIMIT 默认必须是 20（不是 None）"
+def test_fund_holders_two_tier_strategy():
+    """v2.10.1 · fetch_fund_holders 必须双层（头部 full + 其余 lite）"""
+    src = (SCRIPTS_DIR / "fetch_fund_holders.py").read_text(encoding="utf-8")
+    assert "_build_row_full" in src and "_build_row_lite" in src, \
+        "v2.10.1 regression: fetch_fund_holders 必须分 full/lite 双路径"
+    assert "UZI_FUND_STATS_TOP" in src, \
+        "v2.10.1 regression: 必须支持 UZI_FUND_STATS_TOP 环境变量控制几家算完整业绩"
+    # lite 行必须是 0 次 akshare 额外调用
+    lite_idx = src.find("def _build_row_lite")
+    lite_end = src.find("\n\n", lite_idx)
+    lite_body = src[lite_idx:lite_end] if lite_end > 0 else src[lite_idx:lite_idx + 2000]
+    assert "compute_fund_stats" not in lite_body, \
+        "v2.10.1 regression: lite 行不应调 compute_fund_stats（0 API 原则）"
+    assert "fetch_fund_manager_name" not in lite_body, \
+        "v2.10.1 regression: lite 行不应调 fetch_fund_manager_name"
 
 
 def test_lite_mode_detection_exists():
@@ -683,6 +688,52 @@ def test_ddg_budget_enforced():
         assert state["skipped"] >= 0  # 至少调用过
     finally:
         os.environ.pop("UZI_DDG_BUDGET", None)
+
+
+def test_analysis_profile_three_tiers():
+    """v2.10.2 · 三档深度 profile 必须存在且差异清晰"""
+    from lib.analysis_profile import get_profile, DEPTH_LITE, DEPTH_MEDIUM, DEPTH_DEEP
+    lite = get_profile(DEPTH_LITE)
+    mid = get_profile(DEPTH_MEDIUM)
+    deep = get_profile(DEPTH_DEEP)
+    # 档位差异必须显著
+    assert len(lite.fetchers_enabled) < len(mid.fetchers_enabled) == len(deep.fetchers_enabled)
+    assert lite.investors_count < mid.investors_count == deep.investors_count
+    assert lite.ddg_budget < mid.ddg_budget < deep.ddg_budget
+    assert lite.fund_stats_top_n < mid.fund_stats_top_n < deep.fund_stats_top_n
+    assert not lite.enable_bull_bear_debate
+    assert not mid.enable_bull_bear_debate
+    assert deep.enable_bull_bear_debate  # deep 独享
+    assert not lite.enable_segmental_model
+    assert deep.enable_segmental_model
+
+
+def test_analysis_profile_env_compat():
+    """UZI_LITE=1 必须向后兼容到 depth=lite"""
+    import os
+    from lib.analysis_profile import get_profile, DEPTH_LITE, DEPTH_MEDIUM
+    # UZI_LITE=1
+    os.environ["UZI_LITE"] = "1"
+    os.environ.pop("UZI_DEPTH", None)
+    assert get_profile().depth == DEPTH_LITE
+    # 显式 UZI_DEPTH 覆盖 UZI_LITE
+    os.environ["UZI_DEPTH"] = "medium"
+    assert get_profile().depth == DEPTH_MEDIUM
+    # 清理
+    os.environ.pop("UZI_LITE", None)
+    os.environ.pop("UZI_DEPTH", None)
+
+
+def test_prewarm_cache_script_exists():
+    """v2.10.2 · prewarm 脚本存在且具有敏感性扫描"""
+    p = SCRIPTS_DIR / "prewarm_cache.py"
+    assert p.exists(), "v2.10.2 regression: prewarm_cache.py 缺失"
+    content = p.read_text(encoding="utf-8")
+    # 必须有安全扫描
+    assert "sanity_check_output" in content, "prewarm 必须做输出敏感性扫描"
+    assert "MX_APIKEY" in content or "sk-" in content, "敏感扫描必须覆盖 API key 模式"
+    # 必须声明不包含敏感信息
+    assert ".env" in content, "prewarm 文档必须明确排除 .env"
 
 
 def test_fetch_industry_respects_lite_mode():

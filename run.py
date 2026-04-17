@@ -250,7 +250,19 @@ def main():
                         help="v2.6 · 强制重抓所有 fetcher（默认 resume：复用 .cache/{ticker}/raw_data.json 已有维度）")
     parser.add_argument("--enable-xueqiu-login", action="store_true",
                         help="v2.7.1 · 启用 XueQiu Playwright 登录态抓取实盘比赛持仓（首次需 `python -m lib.xueqiu_browser login`）")
+    parser.add_argument("--depth", choices=["lite", "medium", "deep"], default=None,
+                        help="v2.10.2 · 思考深度 · lite(1-2min) / medium(5-8min · 默认) / deep(15-20min · 含 Bull-Bear 辩论 + Segmental)")
     args = parser.parse_args()
+
+    # v2.10.2 · 深度选择（优先级: --depth > UZI_DEPTH env > UZI_LITE env > 默认 medium）
+    try:
+        sys.path.insert(0, str(Path(__file__).parent / "skills" / "deep-analysis" / "scripts"))
+        from lib.analysis_profile import get_profile, apply_profile_to_env, format_banner
+        profile = get_profile(args.depth) if args.depth else get_profile()
+        apply_profile_to_env(profile)
+        print(f"\n{format_banner(profile)}\n")
+    except Exception as _e:
+        print(f"⚠️ 无法加载 analysis_profile: {_e}")
 
     # v2.3 · --force-name 直接覆盖
     if args.force_name:

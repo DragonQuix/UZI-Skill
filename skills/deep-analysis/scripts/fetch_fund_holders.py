@@ -251,10 +251,26 @@ def main(ticker: str, limit: int | None = None) -> dict:
 
     active_holders = [h for h in holders if "error" not in h and _is_active_fund(h.get("基金名称", ""))]
     total_funds = len([h for h in holders if "error" not in h])
-    iter_holders = active_holders if limit is None else active_holders[:limit]
 
-    # v2.4 · 并行计算每个基金的 5Y 统计（以前 100+ 基金串行跑约 30s）
-    def _build_row(row: dict) -> dict | None:
+    # v2.10.1 · 双层策略（用户反馈：基金清单一次就能拿全，没必要每家都算 5Y 业绩）
+    #   · Top N 家（按持仓金额排序）算完整 5Y 业绩（sharpe/回撤/回报）
+    #   · 其余家只列清单（名字 + 持仓% + 基金链接）
+    # 这样 649 家 × 每家 2 API ≈ 1300 次 → 缩到 20 × 2 = 40 次 API
+    # 用户想看某家 5Y 业绩，点 fund_url 到东财看
+    import os as _os
+    stats_top_n = int(_os.environ.get("UZI_FUND_STATS_TOP", "20"))
+
+    # 按持仓金额/比例降序，保证头部大票仓位的拿到完整业绩
+    def _pos_pct(h: dict) -> float:
+        try:
+            return float(h.get("占市值比例", 0) or h.get("占流通股比例", 0))
+        except (ValueError, TypeError):
+            return 0.0
+    sorted_holders = sorted(active_holders, key=_pos_pct, reverse=True)
+    iter_holders = sorted_holders if limit is None else sorted_holders[:limit]
+
+    def _build_row_full(row: dict) -> dict | None:
+        """完整版：算 5Y 业绩 + 查基金经理（2 次 akshare API）"""
         fund_code = str(row.get("基金代码", ""))
         fund_name = str(row.get("基金名称", ""))
         if not fund_code:
@@ -283,18 +299,50 @@ def main(ticker: str, limit: int | None = None) -> dict:
             "peer_rank_pct": 50,
             "nav_history": stats.get("nav_history", []),
             "fund_url": f"https://fund.eastmoney.com/{fund_code}.html",
+            "_row_type": "full",
         }
 
-    # 并行度默认 1（serial）— Py3.13 下 akshare 内部 mini_racer/libffi 并发会致命崩溃。
-    # 设置 UZI_FUND_WORKERS=N (N>1) 强制并行（自担 V8 isolate crash 风险）。
-    # BUG#v2.4-followup: 默认 3 在 Py3.13 + macOS 下 fund_portfolio_hold_em 也会崩。
-    import os as _os
+    def _build_row_lite(row: dict) -> dict | None:
+        """轻量版：只用 holders 数据，0 次 API 额外调用"""
+        fund_code = str(row.get("基金代码", ""))
+        fund_name = str(row.get("基金名称", ""))
+        if not fund_code:
+            return None
+        try:
+            position_pct = float(row.get("占市值比例", 0) or row.get("占流通股比例", 0))
+        except (ValueError, TypeError):
+            position_pct = 0.0
+        return {
+            "name": "—",   # 不查基金经理名
+            "fund_name": fund_name,
+            "fund_code": fund_code,
+            "avatar": "",
+            "position_pct": round(position_pct, 2),
+            "rank_in_fund": 0,
+            "holding_quarters": 1,
+            "position_trend": "持有",
+            "return_5y": None,
+            "annualized_5y": None,
+            "max_drawdown": None,
+            "sharpe": None,
+            "peer_rank_pct": None,
+            "nav_history": [],
+            "fund_url": f"https://fund.eastmoney.com/{fund_code}.html",
+            "_row_type": "lite",
+        }
+
+    # 分两组：头部 top_n 走 full，其余走 lite
+    top_full = iter_holders[:stats_top_n]
+    rest_lite = iter_holders[stats_top_n:]
+
     _workers = int(_os.environ.get("UZI_FUND_WORKERS", "1"))
     managers: list[dict] = []
+
+    # Top N · 完整版（2 次 API/家）
     if _workers <= 1:
-        for row in iter_holders:
+        for row in top_full:
             try:
-                r = _build_row(row)
+                r = _build_row_full(row)
                 if r is not None:
                     managers.append(r)
             except Exception:
@@ -302,7 +350,7 @@ def main(ticker: str, limit: int | None = None) -> dict:
     else:
         from concurrent.futures import ThreadPoolExecutor, as_completed
         with ThreadPoolExecutor(max_workers=_workers) as pool:
-            futures = [pool.submit(_build_row, row) for row in iter_holders]
+            futures = [pool.submit(_build_row_full, row) for row in top_full]
             for fut in as_completed(futures):
                 try:
                     r = fut.result()
@@ -311,8 +359,26 @@ def main(ticker: str, limit: int | None = None) -> dict:
                 except Exception:
                     continue
 
-    # Sort by 5Y return
-    managers.sort(key=lambda m: m.get("return_5y", 0), reverse=True)
+    # 其余 · 轻量版（0 次 API/家 · 纯清单）
+    lite_count = 0
+    for row in rest_lite:
+        try:
+            r = _build_row_lite(row)
+            if r is not None:
+                managers.append(r)
+                lite_count += 1
+        except Exception:
+            continue
+
+    # Sort: full 行有 return_5y 排前面，lite 行按持仓占比排在后面
+    def _sort_key(m: dict) -> tuple:
+        is_full = m.get("_row_type") == "full"
+        return (
+            0 if is_full else 1,                            # full 在前
+            -(m.get("return_5y") or 0) if is_full else 0,   # full 内按 5Y 降序
+            -(m.get("position_pct") or 0),                  # lite 内按持仓降序
+        )
+    managers.sort(key=_sort_key)
 
     passive_count = max(0, total_funds - len(active_holders))
     return {
@@ -320,15 +386,19 @@ def main(ticker: str, limit: int | None = None) -> dict:
         "data": {
             "fund_managers": managers,
             "total_funds_holding": total_funds,
-            "active_funds_count": len(managers),
+            "active_funds_count": len(active_holders),
+            "full_stats_count": len(top_full),
+            "lite_count": lite_count,
             "passive_funds_filtered": passive_count,
             "_note": (
-                f"共 {total_funds} 家基金持有本股 · "
-                f"收录 {len(managers)} 家主动权益基金（已按 5Y 累计收益排序）· "
-                f"过滤 {passive_count} 家 ETF/指数基金"
+                f"共 {total_funds} 家基金持有 · "
+                f"头部 {len(top_full)} 家算完整 5Y 业绩（按持仓排序），"
+                f"其余 {lite_count} 家只列清单（点 fund_url 跳东财看详情）· "
+                f"过滤 {passive_count} 家 ETF/指数基金 · "
+                f"UZI_FUND_STATS_TOP=N 可调"
             ),
         },
-        "source": "akshare:stock_fund_stock_holder + fund_open_fund_info_em",
+        "source": "akshare:stock_fund_stock_holder + fund_open_fund_info_em(top N only)",
         "fallback": False,
     }
 

@@ -157,8 +157,22 @@ def collect_raw_data(ticker: str, max_workers: int = 6, resume: bool = True) -> 
     # ── Wave 2: all other 19 fetchers in parallel ──
     # v2.6 · 加 per-fetcher timeout + overall timeout 防止 hang 卡死整条流水线
     # v2.6 · resume: 已缓存有效的 dim 直接复用，不重新调 fetcher
+    # v2.10.2 · 根据 analysis_profile 决定跑哪几维（lite 只跑核心 7 维）
     wave2_start = time.time()
+    try:
+        from lib.analysis_profile import get_profile as _get_profile
+        _profile = _get_profile()
+        enabled_dims = _profile.fetchers_enabled
+    except Exception:
+        enabled_dims = None
     all_others = [(m, d, a) for m, d, a in FETCHER_MAP if d != "0_basic"]
+    # 按 profile 过滤（None 时不过滤，向后兼容）
+    if enabled_dims is not None:
+        before = len(all_others)
+        all_others = [(m, d, a) for m, d, a in all_others if d in enabled_dims]
+        skipped_profile = before - len(all_others)
+        if skipped_profile > 0:
+            print(f"  [profile] {_profile.depth} 模式跳过 {skipped_profile} 个维度")
     # 分流
     others = []
     skipped_cached = []
@@ -265,14 +279,12 @@ def collect_raw_data(ticker: str, max_workers: int = 6, resume: bool = True) -> 
     def _fund_holders():
         try:
             import fetch_fund_holders
-            # v2.10.1 · 性能优化：默认 limit=20（茅台级大票原先 649 家逐家 akshare
-            # 查询需要 5-10 分钟，对 codex + 首次安装机器是主要耗时瓶颈）。
-            # 大多数分析场景前 20 大基金持仓已能反映机构偏好；需要全量可设
-            # UZI_FUND_LIMIT=all 或 UZI_FUND_LIMIT=<N> 覆盖。
-            import os
-            fl = os.environ.get("UZI_FUND_LIMIT", "20")
-            limit = None if fl in ("all", "none", "None", "0") else int(fl)
-            fh = fetch_fund_holders.main(ticker, limit=limit)
+            # v2.10.1 · 清单 limit 保持 None（全量列出 649 家），慢在 fetch_fund_holders
+            # 内部已改成"头部 top N 算完整 5Y 业绩，其余只列名字"双层策略。
+            # UZI_FUND_STATS_TOP=N 控制几家算完整业绩（默认 20）。
+            # 用户原问题："基金拉全不是直接检索就行了吗" — 对，清单一次 API 就够，
+            # 过去慢是因为每家都跑 5Y NAV 计算，现在只头部跑，其他点 fund_url 看详情。
+            fh = fetch_fund_holders.main(ticker, limit=None)
             return ("fund_managers", (fh.get("data") or {}).get("fund_managers", []), None)
         except Exception as e:
             return ("fund_managers", [], str(e))

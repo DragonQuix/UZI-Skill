@@ -1809,8 +1809,17 @@ def render_fund_managers(managers: list) -> str:
     if not managers:
         return '<div style="padding:24px;text-align:center;color:#94a3b8;font-size:12px">暂无公募基金持仓数据</div>'
 
-    # Sort by 5Y return desc
-    managers_sorted = sorted(managers, key=lambda m: m.get("return_5y", 0), reverse=True)
+    # v2.10.1 · 分 full / lite 两类：full 有 5Y 业绩在前按 5Y 降序，lite 在后按持仓%
+    def _sort_key(m: dict) -> tuple:
+        is_full = m.get("_row_type") == "full" or m.get("return_5y") is not None
+        ret5y = m.get("return_5y") if is_full else 0
+        pos = m.get("position_pct") or 0
+        return (
+            0 if is_full else 1,
+            -(ret5y if isinstance(ret5y, (int, float)) else 0),
+            -pos,
+        )
+    managers_sorted = sorted(managers, key=_sort_key)
     cards = []
     for m in managers_sorted:
         name = m.get("name", "—")
@@ -1891,7 +1900,17 @@ def render_fund_managers(managers: list) -> str:
 </div>'''
         cards.append(card)
 
-    header = f'<div class="fund-mgr-header">✨ <strong>{len(managers)} 位公募基金经理</strong>持有本股 · 按 5 年累计收益排序 · 你可以直接"抄作业"</div>'
+    # v2.10.1 · 头部与清单分开统计
+    full_count = sum(1 for m in managers if m.get("_row_type") == "full" or m.get("return_5y") is not None)
+    lite_count = len(managers) - full_count
+    if lite_count > 0:
+        header = (
+            f'<div class="fund-mgr-header">✨ <strong>{len(managers)} 家公募基金</strong>持有本股 · '
+            f'头部 <strong>{full_count}</strong> 家有完整 5Y 业绩（按收益排序），'
+            f'其余 <strong>{lite_count}</strong> 家按持仓占比列出（点基金链接看详情）</div>'
+        )
+    else:
+        header = f'<div class="fund-mgr-header">✨ <strong>{len(managers)} 位公募基金经理</strong>持有本股 · 按 5 年累计收益排序 · 你可以直接"抄作业"</div>'
 
     INITIAL_SHOW = 6
     if len(cards) <= INITIAL_SHOW:
@@ -1931,19 +1950,17 @@ def render_fund_managers(managers: list) -> str:
 def _render_fund_compact_row(m: dict, rank: int) -> str:
     """One-line strip for fund managers ranked 7+. Used in expanded compact list.
 
-    Reuses color/percentile logic from render_fund_managers so styling stays in sync.
+    v2.10.1: lite 行（return_5y is None）显示持仓占比 + "点击看详情"，
+    不再硬编码 "前 50%" 同类排名这种假数据。
     """
+    is_lite = m.get("_row_type") == "lite" or m.get("return_5y") is None
     name = m.get("name", "—")
     fund_name = m.get("fund_name", "—")
     fund_code = m.get("fund_code", "")
     avatar = m.get("avatar", "")
-    ret_5y = m.get("return_5y", 0) or 0
-    peer_rank = m.get("peer_rank_pct", 50) or 50
+    position_pct = m.get("position_pct") or 0
 
-    ret_color = COLOR_BULL if ret_5y > 0 else COLOR_BEAR
-    rank_color = COLOR_BULL if peer_rank < 20 else COLOR_GOLD if peer_rank < 50 else COLOR_BEAR
-
-    # rank badge: top 3 gold, 4-10 silver, rest plain
+    # rank badge
     if rank <= 3:
         badge_style = "background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff"
     elif rank <= 10:
@@ -1954,20 +1971,39 @@ def _render_fund_compact_row(m: dict, rank: int) -> str:
     if avatar:
         avatar_html = f'<img src="avatars/{avatar}.svg" class="fc-avatar" alt="">'
     else:
-        avatar_html = f'<div class="fc-avatar fc-avatar-ph">{name[0] if name else "?"}</div>'
+        avatar_html = f'<div class="fc-avatar fc-avatar-ph">{(name[0] if name and name != "—" else "?")}</div>'
 
     fund_url = m.get("fund_url", f"https://fund.eastmoney.com/{fund_code}.html")
-    sign = "+" if ret_5y > 0 else ""
+
+    if is_lite:
+        # Lite 行：不展示 5Y 业绩，给一个"点进去看"的提示
+        metric_html = (
+            f'<span class="fc-return" style="color:#94a3b8;font-style:italic">持仓 {position_pct:.2f}%</span>'
+            f'<span class="fc-rank-pct" style="color:#94a3b8;font-size:10px">点→查业绩</span>'
+        )
+        name_display = fund_name  # lite 行没基金经理名，直接显示基金名
+        fund_display = f"代码 {fund_code}"
+    else:
+        ret_5y = m.get("return_5y") or 0
+        peer_rank = m.get("peer_rank_pct") or 50
+        ret_color = COLOR_BULL if ret_5y > 0 else COLOR_BEAR
+        rank_color = COLOR_BULL if peer_rank < 20 else COLOR_GOLD if peer_rank < 50 else COLOR_BEAR
+        sign = "+" if ret_5y > 0 else ""
+        metric_html = (
+            f'<span class="fc-return" style="color:{ret_color}">{sign}{ret_5y:.1f}%</span>'
+            f'<span class="fc-rank-pct" style="color:{rank_color}">前 {peer_rank}%</span>'
+        )
+        name_display = name
+        fund_display = fund_name
 
     return f'''<div class="fund-compact-row">
   <span class="fc-rank" style="{badge_style}">{rank}</span>
   {avatar_html}
   <div class="fc-info">
-    <div class="fc-name">{name}</div>
-    <div class="fc-fund">{fund_name}</div>
+    <div class="fc-name">{name_display}</div>
+    <div class="fc-fund">{fund_display}</div>
   </div>
-  <span class="fc-return" style="color:{ret_color}">{sign}{ret_5y:.1f}%</span>
-  <span class="fc-rank-pct" style="color:{rank_color}">前 {peer_rank}%</span>
+  {metric_html}
   <a href="{fund_url}" target="_blank" rel="noopener" class="fc-link" title="查看基金详情">→</a>
 </div>'''
 
