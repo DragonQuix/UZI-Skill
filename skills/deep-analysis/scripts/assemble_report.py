@@ -89,6 +89,22 @@ def render_chat_message(inv: dict) -> str:
     fail_html = f'<div class="conc-block"><div class="conc-label">❌ 未命中</div><ul>{_li(fail_items)}</ul></div>' if fail_items else ""
     price_html = f'<div class="conc-row"><span>🎯 理想买入价</span><strong>¥{ideal_price}</strong></div>' if ideal_price else ""
 
+    # v2.8 · 因地制宜：每个评委自己方法论回答的 3 个问题（time_horizon / position / 翻盘条件）
+    th = _safe(inv.get("time_horizon"), "")
+    ps = _safe(inv.get("position_sizing"), "")
+    wc = _safe(inv.get("what_would_change_my_mind"), "")
+    profile_rows = []
+    if th and th != "—":
+        profile_rows.append(f'<div class="conc-row"><span>⏱ 时间框架</span><em>{th}</em></div>')
+    if ps and ps != "—":
+        profile_rows.append(f'<div class="conc-row"><span>💰 仓位风格</span><em>{ps}</em></div>')
+    if wc and wc != "—":
+        profile_rows.append(f'<div class="conc-row"><span>🔄 翻盘条件</span><em>{wc}</em></div>')
+    profile_html = (
+        f'<div class="conc-block"><div class="conc-label">🧭 我的方法论</div>{"".join(profile_rows)}</div>'
+        if profile_rows else ""
+    )
+
     return f'''<div class="chat-msg {sig}" data-group="{group}" id="msg-{inv_id}">
   <img src="avatars/{inv_id}.svg" class="msg-avatar" alt="">
   <div class="msg-body">
@@ -108,6 +124,7 @@ def render_chat_message(inv: dict) -> str:
           {pass_html}
           {fail_html}
           {price_html}
+          {profile_html}
         </div>
       </details>
     </div>

@@ -5,6 +5,23 @@
 
 ---
 
+## v2.8.0 (2026-04-17 persona profile · 因地制宜)
+
+### 增强 · 每个评委用自己方法论回答 3 个问题
+- **动机**：Codex 建议把评审升级成"流派 + 人物 + agent 写回"。实地审计发现这些 80% 已有；真正缺的是每个评委的 `time_horizon` / `position_sizing` / `what_would_change_my_mind`
+- **关键原则**：**不是给所有人加 3 个同样的字段**，而是每人按自己方法论填 authentic 内容（Buffett 10 年 vs 赵老哥 T+2 vs Simons <2 天）
+- **已落地**：`lib/investor_profile.py` 22 人手写 + 7 群 fallback
+- **接入**：evaluator.evaluate / _skip_result / _unknown_result 三处返回 · generate_panel 写入 panel.json · assemble_report 新增「🧭 我的方法论」UI 区块
+- **回归测试**：
+  - `test_investor_profile_authentic_per_persona`（buffett/zhao_lg/simons 必须体现差异）
+  - `test_investor_profile_group_fallback`（未注册投资者走 group fallback）
+  - `test_evaluator_carries_profile_fields`
+  - `test_panel_carries_profile_fields`
+- **若未来加/改投资者**：不能把 authentic 人物换成 group fallback（退化）；新增投资者优先加到 PROFILES 而不是只塞进 investor_db
+- **若改 panel 输出 schema**：不能删 3 个字段，报告 UI 已依赖
+
+---
+
 ## v2.7.3 (2026-04-17 data-source expansion)
 
 ### 增强 · 权威域 site: 搜索 + 14 个 Codex 建议源

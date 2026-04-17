@@ -23,6 +23,11 @@ from typing import Any
 
 from lib.investor_criteria import INVESTOR_RULES, Rule
 from lib.investor_knowledge import reality_check
+from lib.investor_profile import get_profile as _get_profile
+from lib.investor_db import INVESTORS as _INVESTORS
+
+# v2.8 · 预构建 id → group 索引，用于 profile 的 group-level fallback
+_INVESTOR_GROUP_MAP: dict[str, str] = {inv["id"]: inv.get("group", "") for inv in _INVESTORS}
 
 
 # ────────────────────────────────────────────────────────────────
@@ -164,6 +169,10 @@ def evaluate(investor_id: str, features: dict) -> dict:
     headline = _build_headline(signal, pass_list, fail_list)
     rationale = _build_rationale(signal, pass_list, fail_list)
 
+    # v2.8 · 因地制宜：加入每人 authentic 3 字段（time_horizon / position_sizing /
+    # what_would_change_my_mind）。不是模板，是按每个投资者自己的方法论填的。
+    profile = _get_profile(investor_id, group=_INVESTOR_GROUP_MAP.get(investor_id, ""))
+
     return {
         "investor_id": investor_id,
         "score": score,
@@ -177,6 +186,10 @@ def evaluate(investor_id: str, features: dict) -> dict:
         "fail_rules": fail_list,
         "headline": headline,
         "rationale": rationale,
+        # v2.8 · per-persona authentic decision profile
+        "time_horizon": profile["time_horizon"],
+        "position_sizing": profile["position_sizing"],
+        "what_would_change_my_mind": profile["what_would_change_my_mind"],
     }
 
 
@@ -217,6 +230,7 @@ def _build_rationale(signal: str, pass_list: list, fail_list: list) -> str:
 
 def _skip_result(investor_id: str, reason: str) -> dict:
     """This investor would not evaluate this stock (market/scope mismatch)."""
+    profile = _get_profile(investor_id, group=_INVESTOR_GROUP_MAP.get(investor_id, ""))
     return {
         "investor_id": investor_id,
         "score": -1,
@@ -231,10 +245,14 @@ def _skip_result(investor_id: str, reason: str) -> dict:
         "headline": f"不适合 — {reason}",
         "rationale": f"该投资者{reason}，不对此股票发表意见。",
         "skip_reason": reason,
+        "time_horizon": profile["time_horizon"],
+        "position_sizing": profile["position_sizing"],
+        "what_would_change_my_mind": profile["what_would_change_my_mind"],
     }
 
 
 def _unknown_result(investor_id: str) -> dict:
+    profile = _get_profile(investor_id, group=_INVESTOR_GROUP_MAP.get(investor_id, ""))
     return {
         "investor_id": investor_id,
         "score": 50.0,
@@ -248,6 +266,9 @@ def _unknown_result(investor_id: str) -> dict:
         "fail_rules": [],
         "headline": "该投资者暂无量化评估规则",
         "rationale": "此投资者未配置规则库，使用默认中性判断。",
+        "time_horizon": profile["time_horizon"],
+        "position_sizing": profile["position_sizing"],
+        "what_would_change_my_mind": profile["what_would_change_my_mind"],
     }
 
 

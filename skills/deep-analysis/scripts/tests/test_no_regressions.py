@@ -281,6 +281,63 @@ def test_registry_contains_codex_authority_sources():
     assert not missing, f"v2.7.3 regression: registry 缺权威源 {missing}"
 
 
+# ─── v2.8 · 因地制宜的 investor_profile 层 ──
+def test_investor_profile_authentic_per_persona():
+    """每人的 time_horizon / position_sizing / what_would_change_my_mind 必须因地制宜"""
+    from lib.investor_profile import get_profile, PROFILES
+
+    # 至少覆盖 22 个标志性人物
+    assert len(PROFILES) >= 22, f"v2.8 regression: authored profiles 少于 22（当前 {len(PROFILES)}）"
+
+    # 不同流派的投资者必须给出真的不同的答案（不是模板占位）
+    buffett = get_profile("buffett", "A")
+    zhao_lg = get_profile("zhao_lg", "F")
+    simons = get_profile("simons", "G")
+    # time_horizon 必须差异巨大（Buffett 10 年 vs 赵老哥 T+2 vs Simons <2 天）
+    assert "10 年" in buffett["time_horizon"], "buffett 必须是长期"
+    assert "T+" in zhao_lg["time_horizon"], "赵老哥必须是超短线"
+    assert "2 天" in simons["time_horizon"] or "<" in simons["time_horizon"], "simons 必须是超高频"
+    # 翻盘条件必须体现不同方法论
+    assert "ROE" in buffett["what_would_change_my_mind"], "buffett 翻盘必须与 ROE 有关"
+    assert "龙头" in zhao_lg["what_would_change_my_mind"] or "板" in zhao_lg["what_would_change_my_mind"]
+    assert "Sharpe" in simons["what_would_change_my_mind"] or "因子" in simons["what_would_change_my_mind"]
+
+
+def test_investor_profile_group_fallback():
+    """未单独注册的投资者必须走 group fallback（不能裸奔到 generic 占位）"""
+    from lib.investor_profile import get_profile
+    # 'gann' / 'darvas' 是 group D，没有单独授权
+    r_d = get_profile("gann", "D")
+    assert r_d["time_horizon"] != "—", "group D fallback 必须有内容"
+    assert "均线" in r_d["what_would_change_my_mind"] or "趋势" in r_d["what_would_change_my_mind"]
+    # 'sunan' 是 group F 游资
+    r_f = get_profile("sunan", "F")
+    assert "板" in r_f["what_would_change_my_mind"] or "龙虎榜" in r_f["what_would_change_my_mind"]
+
+
+def test_evaluator_carries_profile_fields():
+    """evaluate() 返回值必须包含 3 个 profile 字段"""
+    from lib.investor_evaluator import evaluate
+    features = {"market": "A", "ticker": "600519.SH", "name": "x", "industry": "白酒",
+                "roe_5y_min": 20, "roe_5y_avg": 25, "net_margin": 50, "debt_ratio": 20,
+                "fcf_margin": 25, "pe": 20, "pb": 7, "pe_percentile": 30,
+                "revenue_growth_3y_cagr": 14, "dividend_yield": 4, "market_cap_yi": 24000}
+    r = evaluate("buffett", features)
+    assert "time_horizon" in r and r["time_horizon"] != "—"
+    assert "position_sizing" in r and r["position_sizing"] != "—"
+    assert "what_would_change_my_mind" in r and r["what_would_change_my_mind"] != "—"
+
+
+def test_panel_carries_profile_fields():
+    """panel.investors[*] 必须带上 3 个 profile 字段"""
+    src = (SCRIPTS_DIR / "run_real_test.py").read_text(encoding="utf-8")
+    gen_panel_idx = src.find("def generate_panel")
+    assert gen_panel_idx > 0
+    body = src[gen_panel_idx:gen_panel_idx + 6000]
+    for field in ("time_horizon", "position_sizing", "what_would_change_my_mind"):
+        assert field in body, f"v2.8 regression: generate_panel 没往 panel 里写 {field}"
+
+
 if __name__ == "__main__":
     # Manual runner — no pytest required
     import inspect

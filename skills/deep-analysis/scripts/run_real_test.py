@@ -686,6 +686,10 @@ def generate_panel(dims_scored: dict, raw: dict) -> dict:
             "weight_total": verdict_obj["weight_total"],
             "ideal_price": None,
             "period": "中长线" if inv["group"] in ("A", "B", "E") else "短线",
+            # v2.8 · 因地制宜：每个评委用自己方法论回答这 3 个问题
+            "time_horizon": verdict_obj.get("time_horizon", "—"),
+            "position_sizing": verdict_obj.get("position_sizing", "—"),
+            "what_would_change_my_mind": verdict_obj.get("what_would_change_my_mind", "—"),
         })
 
     active_count = len(investors_out) - sig_dist.get("skip", 0)

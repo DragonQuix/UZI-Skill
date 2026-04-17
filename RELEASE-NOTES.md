@@ -1,5 +1,77 @@
 # Release Notes
 
+## v2.8.0 — 2026-04-17 (persona profile · 因地制宜)
+
+> **每个评委用自己的方法论回答 3 个新问题——不是模板，是 22 位标志性人物各自 authentic 的内容**
+
+### 背景
+用户拿到一份 Codex 给的 5 阶段评审系统重建计划（参考 buffett-skills 项目）。经过实地核查：
+- buffett-skills 实际上只是单人物的 markdown 知识卡（9 个 md 文件，0 行代码，无多人物脚手架）
+- Codex 建议的 S2（archetypes）/ S3（personas）/ S4（agent 写回）**80% 已在 UZI 实现**（51 评委 × 180 条规则 + 7 school × 8 stock style + agent_analysis.json 闭环）
+- 按 Codex 计划重建会扔掉 1500+ 行工作代码
+
+所以这版只做**真正的边际价值**：给每个评委加上 authentic 的 3 个决策字段。
+
+### 核心原则 · 因地制宜
+
+**不是给所有人加 3 个同样的模板字段**；是按每个投资者自己方法论填内容：
+
+| 投资者 | time_horizon | position_sizing | what_would_change_my_mind |
+|---|---|---|---|
+| Buffett | 10 年以上 / 永远 | 集中前 5 大 70%+ | ROE 连续 2 年跌破 12% · CEO 离职且战略转向 |
+| 赵老哥 | T+2 到 T+5 | 龙头板仓 10-20% | 板上砸盘 · 龙头断板 · 量能跟不上 |
+| Simons | 平均持仓 < 2 天 | 等权数千只 < 0.5% | Sharpe 跌破 0.5 · 因子衰减 |
+| Lynch | 公司故事讲完为止 3-5 年 | 30-50 只多样化 | PEG > 2 · 库存/应收增速超营收 |
+| Soros | 反身性循环一轮 数周到数月 | 重仓押一次，任何时候可反向 | 市场停止验证我的叙事 |
+| 冯柳 | 3-6 个月等错杀修复 | 偏均衡单票不超 10% | 基本面证伪（订单/产能/客户） |
+
+### 新增
+
+**`lib/investor_profile.py`** (~200 行)
+- `PROFILES`：**22 个标志性人物**手写 authentic 3 字段
+  - Group A 价值派 5 人：buffett / graham / fisher / munger / klarman
+  - Group B 成长派 4 人：lynch / oneill / thiel / wood
+  - Group C 宏观派 4 人：soros / dalio / druck / marks
+  - Group D 技术派 2 人：livermore / minervini
+  - Group E 中国价投 4 人：duan / zhangkun / fengliu / dengxiaofeng
+  - Group F 游资 4 人：zhao_lg / zhang_mz / chengdu / lasa
+  - Group G 量化 1 人：simons
+- `GROUP_DEFAULT`：7 个流派级 fallback（好过通用默认，未单独注册的 29 人按流派走）
+- `GENERIC_FALLBACK`：最后兜底
+
+**接入链路**
+- `lib/investor_evaluator.py::evaluate()` 返回值加 3 个字段
+- `lib/investor_evaluator.py::_skip_result / _unknown_result` 也带 profile（即使 skip 也说自己的时间框架）
+- `run_real_test.py::generate_panel()` 把 3 个字段写入 `panel.json[investors][*]`
+- `assemble_report.py::render_investor_msg()` 在「展开完整结论」里新增「🧭 我的方法论」区块，展示 3 行
+
+### 为什么不做 Codex 的其他阶段
+
+| Codex 阶段 | 判断 | 理由 |
+|---|---|---|
+| S1 事实底座（per-字段 source/confidence） | 部分有价值 | 现有 `_integrity` 已覆盖大部分；per-字段粒度是增量，但工作量大 |
+| S2 6-7 个流派模板 | **已完成** | `investor_db` school A-G + `stock_style.py` 7 style × 7 school 权重矩阵 |
+| S3 persona 重建 | **已完成** | `investor_criteria` 180 条规则 + `investor_personas` voice + `investor_knowledge` reality-check |
+| S4 agent 写回分 3 文件 | **反向** | 现有 `agent_analysis.json` 单文件统一所有 override，拆 3 个是倒退 |
+| S5 Graph/RAG | 暂缓 | Codex 自己说"问题不在检索不够高级"，同意，Claude 直接 Read markdown 比建 vector store 便宜 10× |
+
+### 回归
+
+- **28/28** regression tests pass（新增 4 条）
+- 所有 51 评委现在都有 3 字段输出（22 人 authentic，29 人 group fallback）
+- buffett / zhao_lg / simons 三个典型 profile 差异性 unit-test 验证
+
+### 改动文件
+
+- **NEW** `scripts/lib/investor_profile.py` (+200 行)
+- `scripts/lib/investor_evaluator.py` · +15 行（import profile + 3 字段 merge）
+- `scripts/run_real_test.py::generate_panel` · +5 行
+- `scripts/assemble_report.py::render_investor_msg` · +15 行（新「我的方法论」UI 区块）
+- `scripts/tests/test_no_regressions.py` · +4 条测试
+- 版本号 2.7.3 → 2.8.0（4 个 manifest）
+
+---
+
 ## v2.7.3 — 2026-04-17 (data-source expansion)
 
 > **按 Codex 建议扩充 14 个权威数据源 + 新增 `search_trusted` site: 限定搜索**
