@@ -1,7 +1,19 @@
 ---
 name: lhb-analyzer
 description: 龙虎榜深度分析器。识别游资席位、判断机构 vs 游资博弈、对照同板块龙虎榜找辨识度龙头。当用户问"谁在买这只票/最近龙虎榜怎么样/X游资有没有上榜/这是不是X的票"时使用。
+version: 2.10.8
+author: FloatFu-true
+license: MIT
+metadata:
+  hermes:
+    tags: [finance, a-share, lhb, hot-money, market-microstructure]
+    related_skills: [deep-analysis]
+    requires: [deep-analysis]
 ---
+
+> **Hermes 用户注意**：本 skill 调用 `deep-analysis/scripts/fetch_lhb.py`。请先装 deep-analysis：
+> `hermes skills install wbh604/UZI-Skill/skills/deep-analysis`
+
 
 # 龙虎榜深度分析
 

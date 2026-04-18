@@ -1,5 +1,61 @@
 # Release Notes
 
+## v2.10.8-hermes — 2026-04-18 (Hermes Agent 兼容适配 · 专属分支，不回灌 main)
+
+> **本版仅发布到 `hermes-compat` 分支**，main 保持 v2.10.7 不动 · Claude Code / Codex / Cursor 用户不受影响。
+
+### 背景
+
+Nous Research 的 Hermes Agent 原生支持从 GitHub 安装 skill（`tools/skills_hub.py::GitHubSource.fetch`），identifier 格式 `owner/repo/path/to/skill-dir`。本版让 UZI-Skill 4 个 skill 直接可被 `hermes skills install` 拉取。
+
+### 适配内容
+
+**1. 4 个 SKILL.md 加 `metadata.hermes` 字段**
+- `tags` + `related_skills` 便于 Hermes Hub 搜索
+- 3 个 satellite（investor-panel/lhb-analyzer/trap-detector）标 `requires: [deep-analysis]`
+
+**2. `skills/deep-analysis/requirements.txt`**
+- 从 repo 根复制（`hermes skills install` 只拉目标子目录，root requirements.txt 不来）
+
+**3. `run.py` 路径兼容**（additive · backward-compat）
+- 自动探测两种 layout：repo 根（`skills/deep-analysis/scripts/`） vs skill 目录（`scripts/`）
+- Claude Code / Codex 的 repo 根调用继续走原路径
+- Hermes 装到 `~/.hermes/skills/deep-analysis/` 后也能跑
+
+**4. SKILL.md 增 "First-run setup" 章节**
+- 指导 LLM 首次触发时自动跑 `pip install -r requirements.txt` 到 Hermes venv
+- 国内网络加清华镜像 fallback 提示
+
+**5. 新增 `INSTALL-HERMES.md`**
+- 3 种装法：原生 install（推荐）/ clone+symlink / branch 切换
+
+**6. README badge 加 "Hermes Compatible"**
+
+### 安装
+
+```bash
+hermes skills install wbh604/UZI-Skill/skills/deep-analysis
+```
+
+详见 [INSTALL-HERMES.md](INSTALL-HERMES.md)。
+
+### 测试
+
+- 90 passed（原 88 + 无新增 Hermes 专项）
+- `run.py` 两种 layout 路径探测验证通过
+- 4 个 SKILL.md YAML frontmatter PyYAML 解析无错
+
+### 不影响其他环境
+
+| 环境 | 受影响 | 原因 |
+|---|---|---|
+| Claude Code (main) | ❌ | main 没动 |
+| Codex (main) | ❌ | main 没动 |
+| Cursor (main) | ❌ | main 没动 |
+| Hermes | ✅ 新支持 | 从 hermes-compat 分支装 |
+
+---
+
 ## v2.10.7 — 2026-04-18 (market 传播 + resume 别名命中 + agent 深浅两路径)
 
 > **Codex 对主线做整体代码审查，发现 v2.10.5 执行链路还有 3 处不符合预期**

@@ -1,12 +1,50 @@
 ---
 name: deep-analysis
 description: 个股深度分析的核心工作流。当用户要求"深度分析 / 全面分析 / 帮我看看 / 值不值得买 / DCF / 机构建模 / 首次覆盖 / 投委会备忘录"等涉及个股研究的请求时触发。覆盖 A 股、港股、美股，产出 22 维数据 + 51 位大佬量化评审 + 6 种机构级估值建模 (DCF/Comps/LBO/3-Stmt/Merger) + 7 种研究产物 (首次覆盖/财报解读/催化剂日历/投资逻辑追踪/晨报/量化筛选/行业综述) + 6 种决策方法 (IC Memo/DD/Porter/单位经济/VCP/再平衡) + 杀猪盘检测，最终生成 Bloomberg 风格 HTML 报告 + 社交分享战报。关键词：股票、个股、深度分析、估值、DCF、comps、首次覆盖、IC memo、杀猪盘、龙虎榜、akshare。
+version: 2.10.8
+author: FloatFu-true
+license: MIT
+metadata:
+  hermes:
+    tags: [finance, stocks, a-share, hong-kong, us-stocks, dcf, valuation, equity-research, trap-detection]
+    related_skills: [investor-panel, lhb-analyzer, trap-detector]
 ---
 
 # Stock Deep Analysis · 深度分析工作流 v2.2
 
 > 你正在扮演一位**首席股票分析师**。你身边有一套完整的量化工具箱，但最终的判断和叙事**必须你来写**。
 > 脚本负责算数，你负责推理和下结论。
+
+## 🟢 Hermes 用户 · First-run setup（首次触发时自动处理）
+
+当你第一次被 Hermes 触发执行本 skill 且检测到缺少依赖（`ImportError: No module named akshare` 等），按下面顺序自动完成引导：
+
+1. 定位 skill 目录（Hermes 装在 `~/.hermes/skills/deep-analysis/`）
+2. 用 Hermes venv 装依赖：
+   ```bash
+   # 优先尝试 Hermes 自带 venv（装 skill 专属 Python 依赖不污染系统）
+   ~/.hermes/venv/bin/pip install -r ~/.hermes/skills/deep-analysis/requirements.txt
+
+   # 若 Hermes 用了其他 python（HERMES_PYTHON 或 $PATH 中的 python3），用它：
+   $(command -v python3) -m pip install -r ~/.hermes/skills/deep-analysis/requirements.txt
+   ```
+3. 中国大陆网络若 pip 卡住，加清华镜像：
+   ```bash
+   python3 -m pip install -r ~/.hermes/skills/deep-analysis/requirements.txt \
+       -i https://pypi.tuna.tsinghua.edu.cn/simple
+   ```
+4. 可选：把 `MX_APIKEY` / `TUSHARE_TOKEN` 写到 `~/.hermes/.env`（东财妙想 API / tushare 数据源增强）
+5. 装完再调 skill 的主入口：`python3 ~/.hermes/skills/deep-analysis/scripts/run_real_test.py <ticker>` 或 `python3 ~/.hermes/skills/deep-analysis/run.py <ticker> --depth lite --no-browser`
+
+**注意**：本 skill 不会改动 Hermes 核心环境，只在 venv 里装 akshare / pandas 等数据科学包。首次安装 100-200MB，后续触发秒级启动。
+
+首次装完后，在后续触发里**不要重复跑 pip install**（已在 venv 里）。只有遇到 `ImportError` 才重新装。
+
+## 🔵 其他平台用户
+
+- **Claude Code / Codex / Cursor**：按 `INSTALL.md` 走
+- **OpenClaw**：`hermes claw migrate` 迁移后自动装好
+- **命令行直跑**：按 README `git clone + pip install + python run.py` 走
 
 ## 🎯 角色定位（非常重要）
 
