@@ -299,6 +299,56 @@ _TIER1: list[DataSource] = [
         1, "http", "known_good",
         "DEX 数据 · Uniswap/PancakeSwap 等 · 链上资金流参考"
     ),
+    # ── v2.13.6 新增 · 期货/新闻源（curl 真实验证 2026-04-19）──
+    DataSource(
+        "jin10_flash", "金十数据实时快讯",
+        "https://www.jin10.com/flash_newest.js",
+        ("A", "H", "U"),
+        ("3_macro", "13_policy", "15_events", "17_sentiment"),
+        1, "http", "known_good",
+        "财联社替代品 · 实时快讯 JSON · 38KB · 含国内外宏观/政策/突发/行情 · akshare 也封装为 ak.js_news()"
+    ),
+    DataSource(
+        "em_kuaixun", "东财快讯 (kuaixun) · 类财联社",
+        "https://newsapi.eastmoney.com/kuaixun/v1/getlist_102_ajaxResult_50_1_.html",
+        ("A", "H", "U"),
+        ("15_events", "17_sentiment"),
+        1, "http", "known_good",
+        "东财快讯流 · 62KB · 含股票/宏观/政策/突发新闻 · 跟财联社风格相近"
+    ),
+    DataSource(
+        "em_stock_ann", "东财上市公司公告",
+        "https://np-anotice-stock.eastmoney.com/api/security/ann",
+        ("A",),
+        ("15_events",),
+        1, "http", "known_good",
+        "公告 JSON 流 · 支持 page_size + ann_type 过滤 · 替代 cninfo 做高频轮询"
+    ),
+    DataSource(
+        "qh99_inventory", "99 期货网 · 库存/现货/基差",
+        "https://www.99qh.com/",
+        ("A",),
+        ("8_materials", "9_futures"),
+        1, "http", "known_good",
+        "中国最全期货库存/仓单/现货价/基差数据 · 需 HTML 解析 · 国内期货行业核心源"
+    ),
+    DataSource(
+        "cfachina", "中国期货业协会",
+        "http://www.cfachina.org/",
+        ("A",),
+        ("9_futures", "13_policy"),
+        1, "http", "known_good",
+        "期货业政策/法规/协会公告 · 权威官方 · 国内期货政策参考"
+    ),
+    DataSource(
+        "ths_news_today", "同花顺今日财经快讯",
+        "http://news.10jqka.com.cn/today_list/",
+        ("A", "H"),
+        ("15_events", "17_sentiment"),
+        1, "http", "known_good",
+        "同花顺实时快讯列表 · 68KB HTML 解析 · 财经/行情/行业快讯聚合"
+    ),
+    # 腾讯期货（已有 tencent_qt tencent_hk_quote · 期货用相同 endpoint 不同参数）· 不重复登记
 ]
 
 # ═══════════════════════════════════════════════════════════════

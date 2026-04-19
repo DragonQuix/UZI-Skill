@@ -1,5 +1,81 @@
 # Release Notes
 
+## v2.13.6 — 2026-04-19 (新增 6 个经 curl 验证的期货 + 财经新闻源)
+
+> **用户提供第二波 Grok 清单**（期货 + 财经新闻 · 10+ 端点）· 批量 curl 真实验证 · 6 有效新源登记
+
+### 新增 6 源（SOURCES 64 → 70）
+
+**新闻类（财联社替代方案）：**
+
+1. **金十数据 `jin10.com/flash_newest.js`** ⭐
+   - 实时快讯 JSON · 38KB · 含国内外宏观/政策/突发/行情
+   - 覆盖 A/H/U 三市场 · 标 `15_events` + `17_sentiment` + `3_macro` + `13_policy`
+   - akshare 也有封装 `ak.js_news()` · 双重接入
+   - **这是"类财联社"的最佳零 Key 替代**
+
+2. **东财快讯 `newsapi.eastmoney.com/kuaixun/v1/`**
+   - 62KB 实时快讯 JSON · 类财联社风格
+   - 覆盖 `15_events` + `17_sentiment`
+
+3. **东财上市公司公告 `np-anotice-stock.eastmoney.com/api/security/ann`**
+   - JSON 公告流 · 支持 `page_size` + `ann_type` 过滤
+   - 替代 cninfo 做高频轮询
+   - 覆盖 `15_events`（A 股）
+
+4. **同花顺今日快讯 `news.10jqka.com.cn/today_list/`**
+   - 68KB HTML · 财经/行情/行业快讯聚合
+   - 覆盖 A/H · `15_events` + `17_sentiment`
+
+**期货类：**
+
+5. **99 期货网 `www.99qh.com`**
+   - 中国最全期货库存/仓单/现货价/基差数据
+   - 覆盖 `8_materials` + `9_futures`
+   - HTML 解析（141KB）
+
+6. **中期协 `www.cfachina.org`**
+   - 官方协会公告/法规 · 权威政策源
+   - 覆盖 `9_futures` + `13_policy`
+
+### 验证无效不入库的 7 源
+
+| 源 | HTTP | 原因 |
+|---|---|---|
+| 新浪期货 `hq.sinajs.cn/list=CFF_RE_IF0` | 403 | 国内反爬 |
+| 金十 flash-api `flash-api.jin10.com` | 502 | 端点挂（但 flash_newest.js 在） |
+| 新浪 RSS china / finance roll | 404 | URL 已撤 |
+| 央视 RSS `news.cntv.cn/rss/rss.jsp` | 404 | RSS 不再维护 |
+| 网易 RSS `rss.163.com` | 0 | 连接不通 |
+| 雪球 batch quote API | 400 | 需 cookie/登录 |
+| 财联社官方 REST | — | Grok 自己说明没有公开 API |
+
+### akshare 封装（已通过 akshare tier 覆盖 · 本版不重复登记）
+
+- `ak.js_news()` · 金十数据
+- `ak.futures_news_baidu()` · 百度期货新闻
+- `ak.get_cffex_daily()` / `get_dce_daily()` / `get_czce_daily()` · 四大交易所
+- `ak.futures_zh_spot()` / `futures_zh_daily_sina()` · 期货行情
+
+### 回归测试
+
+- 新增 `tests/test_v2_13_6_news_futures.py` · 10 用例
+- 覆盖：6 新源 ID / 维度标注 / market 覆盖 / 无重复 / `http_sources_for('15_events', 'A')` 包含新源
+- 全量 **205 passed**（v2.13.5 195 + 新 10）
+
+### 升级
+
+`git pull origin main` · registry 立即生效 · 6 新源已登记可被 `http_sources_for` 查到 · fetcher 接入下版本按需做
+
+### 展望 · 真正的财联社替代栈
+
+推荐优先使用组合：
+- **实时快讯**：`ak.js_news()`（金十 akshare 封装）或直连 `jin10.com/flash_newest.js`
+- **公司公告**：`np-anotice-stock.eastmoney.com/api/security/ann`（东财 JSON）或 cninfo
+- **财经聚合**：`news.10jqka.com.cn/today_list/`（同花顺 HTML）
+
+---
+
 ## v2.13.5 — 2026-04-19 (NetworkProfile 自适应 + agent HARD-GATE 主动触发 Playwright)
 
 > **用户反馈**："我使用下来，并没有遇到模型主动使用 Playwright 的问题" · 诊断发现 agent role-play 阶段根本没教过要调 Playwright · 脚本自动跑 OK 但 agent 不补漏
