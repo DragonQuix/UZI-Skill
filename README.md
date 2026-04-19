@@ -12,7 +12,7 @@
 [![Methods](https://img.shields.io/badge/Institutional%20Methods-17-red)]()
 [![Self-Review](https://img.shields.io/badge/Self--Review-13%20checks-blueviolet)](skills/deep-analysis/scripts/lib/self_review.py)
 
-A 股 / 港股 / 美股 · 个股深度分析引擎 · **v2.13 Playwright 分级兜底 + v2.11 评分校准 + Hermes 兼容**
+A 股 / 港股 / 美股 · 个股深度分析引擎 · **v2.13.7 16 新闻/期货/行情 源全接入 + v2.13.5 NetworkProfile agent HARD-GATE + v2.11 评分校准**
 
 [安装](#安装) · [用法](#用法) · [三档深度](#-三档思考深度v2103-新增) · [Hermes 🆕](INSTALL-HERMES.md) · [评审团](#-51-位评审团) · [机构方法](#-17-种机构级方法) · [自查 gate](#-机械级自查-gatev29-起) · [报告截图](#-报告长什么样) · [FAQ](#-faq) · [入群交流测试](#-测试交流群)
 
@@ -45,7 +45,7 @@ A 股 / 港股 / 美股 · 个股深度分析引擎 · **v2.13 Playwright 分级
 一句话：输入一只股票，Claude 变成你的私人分析师，跑完 22 个维度的数据、调 17 种华尔街分析模型、让 51 个投资风格完全不同的大佬各自打分，最后吐出一份 600KB 的 Bloomberg 风格报告。
 
 ```
-/analyze-stock 国盾量子
+/stock-deep-analyzer:analyze-stock 国盾量子
 ```
 
 5-8 分钟后你会得到：
@@ -77,31 +77,25 @@ A 股 / 港股 / 美股 · 个股深度分析引擎 · **v2.13 Playwright 分级
 /plugin install stock-deep-analyzer@uzi-skill
 ```
 
-装好后说 `/analyze-stock 贵州茅台`。
+装好后说 `/stock-deep-analyzer:analyze-stock 贵州茅台`。
 
-> ⚠️ **Claude Code 会自动给 plugin 命令加命名空间前缀**
+> ⚠️ **必须带 `stock-deep-analyzer:` 命名空间前缀**
 >
-> Claude Code 装 plugin 后，所有 skill/command 会以 `stock-deep-analyzer:` 开头
-> （plugin.name 就是这个 slug）。所以在 **skill 面板 / 自动补全列表** 里你看到
-> 的是下面这种全名：
+> Claude Code 装 plugin 后，所有 skill/command 都以 `stock-deep-analyzer:` 开头。
+> 部分环境下短名（`/analyze-stock`）不会被自动解析——稳妥起见请一律用全名：
 >
-> - `stock-deep-analyzer:analyze-stock`
-> - `stock-deep-analyzer:quick-scan`
-> - `stock-deep-analyzer:scan-trap`
-> - `stock-deep-analyzer:dcf`
-> - `stock-deep-analyzer:ic-memo`
-> - `stock-deep-analyzer:investor-panel`
-> - `stock-deep-analyzer:trap-detector`
-> - `stock-deep-analyzer:deep-analysis`
+> - `/stock-deep-analyzer:analyze-stock <ticker>`
+> - `/stock-deep-analyzer:quick-scan <ticker>`
+> - `/stock-deep-analyzer:scan-trap <ticker>`
+> - `/stock-deep-analyzer:dcf <ticker>`
+> - `/stock-deep-analyzer:ic-memo <ticker>`
+> - `/stock-deep-analyzer:investor-panel <ticker>`
+> - `/stock-deep-analyzer:trap-detector <ticker>`
+> - `/stock-deep-analyzer:deep-analysis <ticker>`
 > - 等全部 14 条
 >
-> **直接用短名也行**（`/analyze-stock 贵州茅台` / `/dcf 600519`）—— Claude Code
-> 只要命令名不冲突就会自动解析到 plugin 下。只有当你同时装了另一个也叫
-> `/analyze-stock` 的 plugin、或者自动补全找不到时，才需要手打全名
-> `/stock-deep-analyzer:analyze-stock`。
->
-> Cursor / Gemini CLI / Codex 同理：plugin 安装后也会加前缀，大多数情况下短名
-> 可用。
+> Cursor / Gemini CLI / Codex 同理：**一律用 `/stock-deep-analyzer:<cmd>` 全名**，
+> 避免短名解析失败。
 
 ### Codex
 
@@ -156,29 +150,31 @@ agent 会自动用 `--remote` 启动 Cloudflare Tunnel，给你一个 `https://x
 ### 完整深度分析（5-8 分钟）
 
 ```
-/analyze-stock 水晶光电
-/analyze-stock 002273
-/analyze-stock 00700.HK
-/analyze-stock AAPL
+/stock-deep-analyzer:analyze-stock 水晶光电
+/stock-deep-analyzer:analyze-stock 002273
+/stock-deep-analyzer:analyze-stock 00700.HK
+/stock-deep-analyzer:analyze-stock AAPL
 ```
 
 ### 专项命令
 
+> 都要加 `/stock-deep-analyzer:` 前缀才保证执行得通。
+
 | 命令 | 干嘛的 |
 |---|---|
-| `/dcf 600519` | DCF 估值 · WACC + 5×5 敏感性表 |
-| `/comps 002273` | 同行对标 · PE/PB 分位分析 |
-| `/lbo 600519` | LBO 测试 · PE 买方能赚多少 IRR |
-| `/initiate 002273` | 机构首次覆盖报告 · JPM/GS 格式 |
-| `/ic-memo 002273` | 投委会备忘录 · 三情景回报 |
-| `/earnings 002273` | 财报解读 · beat/miss 检测 |
-| `/catalysts 002273` | 催化剂日历 · 未来 60 天 |
-| `/thesis 002273` | 投资逻辑追踪 · 5 支柱监控 |
-| `/screen 002273` | 5 套量化筛选 · value/growth/quality |
-| `/dd 002273` | 尽调清单 · 5 工作流 21 项 |
-| `/quick-scan 002273` | 30 秒速判 |
-| `/panel-only 600519` | 只看 51 评委投票 |
-| `/scan-trap 002273` | 杀猪盘排查 |
+| `/stock-deep-analyzer:dcf 600519` | DCF 估值 · WACC + 5×5 敏感性表 |
+| `/stock-deep-analyzer:comps 002273` | 同行对标 · PE/PB 分位分析 |
+| `/stock-deep-analyzer:lbo 600519` | LBO 测试 · PE 买方能赚多少 IRR |
+| `/stock-deep-analyzer:initiate 002273` | 机构首次覆盖报告 · JPM/GS 格式 |
+| `/stock-deep-analyzer:ic-memo 002273` | 投委会备忘录 · 三情景回报 |
+| `/stock-deep-analyzer:earnings 002273` | 财报解读 · beat/miss 检测 |
+| `/stock-deep-analyzer:catalysts 002273` | 催化剂日历 · 未来 60 天 |
+| `/stock-deep-analyzer:thesis 002273` | 投资逻辑追踪 · 5 支柱监控 |
+| `/stock-deep-analyzer:screen 002273` | 5 套量化筛选 · value/growth/quality |
+| `/stock-deep-analyzer:dd 002273` | 尽调清单 · 5 工作流 21 项 |
+| `/stock-deep-analyzer:quick-scan 002273` | 30 秒速判 |
+| `/stock-deep-analyzer:panel-only 600519` | 只看 51 评委投票 |
+| `/stock-deep-analyzer:scan-trap 002273` | 杀猪盘排查 |
 
 ---
 
@@ -259,11 +255,11 @@ python run.py 600519
 
 | 命令 | 隐式档位 |
 |---|---|
-| `/quick-scan 600519` | lite |
-| `/panel-only 600519` | lite |
-| `/analyze-stock 600519` | medium（默认）|
-| `/ic-memo 600519` | deep |
-| `/initiate 600519` | deep |
+| `/stock-deep-analyzer:quick-scan 600519` | lite |
+| `/stock-deep-analyzer:panel-only 600519` | lite |
+| `/stock-deep-analyzer:analyze-stock 600519` | medium（默认）|
+| `/stock-deep-analyzer:ic-memo 600519` | deep |
+| `/stock-deep-analyzer:initiate 600519` | deep |
 
 ---
 
@@ -616,7 +612,7 @@ A: 5-8 分钟，主要是数据采集慢（22 个维度要调十几个 API）。
 A: 不需要。全部免费源（akshare / yfinance / DuckDuckGo / 巨潮 / 东方财富 / 雪球），零 API key。
 
 **Q: 港股美股能用吗？**
-A: 能。`/analyze-stock 00700.HK` 或 `/analyze-stock AAPL`。
+A: 能。`/stock-deep-analyzer:analyze-stock 00700.HK` 或 `/stock-deep-analyzer:analyze-stock AAPL`。
 
 **Q: 数据准不准？**
 A: 实时数据走东方财富 / 雪球，财报走巨潮 / akshare，和你在东方财富 App 上看到的一样。但 web search 质量不稳定（DuckDuckGo 中文搜索有时会返回无关结果），所以 Claude 会做二次审查。
@@ -640,6 +636,12 @@ python run.py <ticker> --no-resume
 
 | 版本 | 日期 | 主要变化 |
 |---|---|---|
+| **v2.13.7** | 2026-04-19 | **16 新源真正接入 fetcher**：v2.13.4/6 登记但未用的 16 源全部接通——新建 `lib/news_providers.py`（jin10/em 快讯/em 公告/同花顺 4 源聚合）接入 `fetch_events` + `fetch_sentiment`；`_yahoo_v8_chart` 直连 HTTP 接入 US/HK K 线链（绕 yfinance cookie）；cfachina 期货协会源接入 `fetch_policy`（期货/商品 industry 专用）。实测 4/4 新闻源通 · A 股 15_events 密度 3-5 → 10-30 条 · pytest 217 passed |
+| **v2.13.6** | 2026-04-19 | **新增 6 个经 curl 验证的期货 + 财经新闻源**（SOURCES 64 → 70）：jin10_flash（类财联社零 Key 替代）/ em_kuaixun / em_stock_ann / ths_news_today / 99qh / cfachina · 8 专项测试 |
+| **v2.13.5** | 2026-04-19 | **NetworkProfile 自适应 + agent HARD-GATE 主动触发 Playwright**：9 目标 3 组网络预检（domestic/overseas/search）+ 代理检测 + 5min cache · SKILL.md / AGENTS.md 加 `HARD-GATE-PLAYWRIGHT-AUTOFILL` 让 agent 主动 FORCE · 15 专项测试 |
+| **v2.13.4** | 2026-04-19 | **新增 10 个经 curl 验证的无 Key 公开数据源**（SOURCES 54 → 64）：Yahoo Chart v8 / 腾讯 qt HK / 加密货币（CoinGecko/Binance/CoinCap）/ ECB / World Bank 等 · 11 专项测试 |
+| **v2.13.3** | 2026-04-19 | **51 评委规则全员历史立场还原**：林奇 PE<40 Rolls Royce 红线、索罗斯 long/short 拆分、木头姐 CPO/光模块 whitelist、段永平/张坤/邓晓峰 PE 硬红线、游资 range 校验 · 10 专项测试 |
+| **v2.13.2** | 2026-04-19 | **Playwright 触发逻辑升级 · 数据质量感知 + FORCE flag**：`_dim_quality_score` 公开字段真空检测 · `UZI_PLAYWRIGHT_FORCE=1` 强制全维兜底 · 8 专项测试 |
 | **v2.13.1** | 2026-04-18 | **Playwright 全 10 维覆盖**（开源研究场景扩展）：v2.13.0 Codex 保守排除的 5 维（7_industry 百度搜索 / 14_moat 百度百科 / 13_policy 证监会 / 18_trap 小红书 / 19_contests 雪球组合）全部加回 · medium 4→6 维 · deep 5→10 维 · 22 专项测试 |
 | **v2.13.0** | 2026-04-18 | **Playwright 通用兜底 · 按三档 profile 分级**：lite `off` / medium `opt-in` (4 维) / deep `default` (5 维 · 首次 y/n 自动装 Chromium)。新增 `lib/playwright_fallback.py` · 抽离 `lib/junk_filter.py` |
 | **v2.12.1** | 2026-04-18 | **4 个报告板块空数据/错数据修复**（中际旭创实测驱动）：4_peers 三层 fallback + 雪球 Playwright opt-in · 7_industry regex 上下文感知 · core_material 垃圾过滤 · BCG 真实算 market_share + 阈值调整 · 16 专项测试 |
