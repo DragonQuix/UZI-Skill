@@ -603,6 +603,53 @@ python run.py 贵州茅台
 **双端都不通**：agent 应保留 `_data_gaps.json` / `_resolve_error.json`，
 等网络恢复后直接跑 `stage2()` 可以复用已采集数据，不用从头来过。
 
+**本地代理与 SSL 握手冲突**（v3.0 新增 · 仅 refactor/v3.0.0-pipeline-architecture 分支）
+
+若本机运行了 Clash / v2rayN / Shadowsocks 等代理客户端，且启用了 TUN 模式或系统代理，Python
+脚本可能遇到东方财富（`push2.eastmoney.com`）等国内数据源报 SSL 错误：
+
+```
+SSLError: DECRYPTION_FAILED_OR_BAD_RECORD_MAC
+```
+
+**原因**：TUN 模式在系统底层劫持 443 端口流量，对 HTTPS 请求做中间人解密。东方财富服务器检测到
+非标准证书链后拒绝连接。脚本本身是直连的（不走代理），但被系统层代理截获后握手失败。
+
+**解决方案**：设置环境变量让 Python 走代理的 HTTP 端口（而非 TUN 劫持），同时用 `NO_PROXY`
+排除国内数据源让其直连：
+
+```bash
+# ── 永久生效（推荐）── 加到 ~/.bashrc 或 ~/.zshrc
+export HTTPS_PROXY=http://127.0.0.1:7890   # Clash 默认 HTTP 端口；其他代理改端口号
+export HTTP_PROXY=http://127.0.0.1:7890
+export NO_PROXY="push2.eastmoney.com,push2his.eastmoney.com,qt.gtimg.cn,stock.xueqiu.com,cninfo.com.cn,data.eastmoney.com"
+
+# ── Windows 系统环境变量（PowerShell 管理员运行）──
+[Environment]::SetEnvironmentVariable('HTTPS_PROXY', 'http://127.0.0.1:7890', 'User')
+[Environment]::SetEnvironmentVariable('HTTP_PROXY', 'http://127.0.0.1:7890', 'User')
+[Environment]::SetEnvironmentVariable('NO_PROXY', 'push2.eastmoney.com,push2his.eastmoney.com,qt.gtimg.cn,stock.xueqiu.com,cninfo.com.cn,data.eastmoney.com', 'User')
+# 注意设置后需重启终端
+```
+
+| 变量 | 作用 | 不设的后果 |
+|------|------|-----------|
+| `HTTPS_PROXY` | 指定 Python HTTPS 请求走代理 HTTP 端口 | TUN 劫持导致 SSL 握手失败，东财/雪球数据全部拿不到 |
+| `HTTP_PROXY` | 同上，HTTP 请求 | 同 HTTPS |
+| `NO_PROXY` | 排除国内数据源，让其直连（避免代理转发延时） | 国内源走代理可能变慢，Clash 规则正确时无功能影响 |
+
+各代理客户端默认端口参考：
+
+| 客户端 | HTTP 端口 |
+|--------|----------|
+| Clash / Clash Verge | `7890` |
+| Clash Verge (新) | `7897` |
+| v2rayN | `10808` |
+| Shadowsocks | `1080` |
+
+> **注意**：若代理已关闭或未使用 TUN 模式，上述变量**无需设置**——脚本默认直连即可正常
+> 访问所有数据源。判断方法：运行 `python run.py <ticker>`，若网络预检显示 `proxy=yes`
+> 且出现 SSL 错误，才需按本节配置。
+
 详见 [AGENTS.md · 网络受限环境](AGENTS.md) 的场景 A/B/C 速查。
 
 ---
