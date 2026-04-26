@@ -75,11 +75,39 @@ def main(user_input: str) -> dict:
         }
 
     data = ds.fetch_basic(ti)
+
+    # v3.0: 理杏仁基础信息补充 (上市日期/ST状态/融资融券/陆股通)
+    if ti.market in ("A", "H"):
+        import os
+        if os.environ.get("LIXINGER_TOKEN", "").strip():
+            try:
+                from lib.lixinger_client import fetch_company_info as lx_company
+                market = "hk" if ti.market == "H" else "cn"
+                code = ti.code.zfill(5) if market == "hk" else ti.code
+                co = lx_company(code, market=market)
+                if co:
+                    rows = co.get("_raw") or co.get("data") or []
+                    if rows:
+                        r = rows[0]
+                        for key, label in [
+                            ("ipoDate", "ipo_date"),
+                            ("listingStatus", "listing_status"),
+                            ("exchange", "exchange"),
+                            ("mutualMarketFlag", "stock_connect"),
+                            ("marginTradingAndSecuritiesLendingFlag", "margin_trading"),
+                        ]:
+                            val = r.get(key)
+                            if val is not None:
+                                data["_lx_" + label] = val
+                        data["_lx_enriched"] = True
+            except Exception:
+                pass  # non-critical, silently skip
+
     return {
         "ticker": ti.full,
         "market": ti.market,
         "data": data,
-        "source": f"akshare:{ti.market}",
+        "source": f"akshare:{ti.market}" + (" + lixinger:company" if data.get("_lx_enriched") else ""),
         "fallback": False,
     }
 
