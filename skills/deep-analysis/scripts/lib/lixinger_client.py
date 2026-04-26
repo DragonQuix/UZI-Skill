@@ -544,3 +544,166 @@ def latest(series: list, default=None):
 def to_yi(v) -> float:
     """原始数值（通常是元）转亿。"""
     return round(to_float(v) / 1e8, 2)
+
+
+def fetch_block_deals(stock_code: str, start_date: str = "2025-01-01",
+                      end_date: str = "2026-12-31", limit: int = 50) -> list[dict]:
+    """获取单只股票大宗交易数据 (v2.16 · 替代 akshare 全A批量拉取).
+
+    Args:
+        stock_code: 股票代码，如 "601336"
+        start_date: YYYY-MM-DD
+        end_date: YYYY-MM-DD
+        limit: 返回条数上限
+
+    Returns:
+        [{"date": "2025-08-29", "tradingPrice": 64.69, "tradingAmount": 4819400,
+          "tradingVolume": 74500, "buyBranch": "...", "sellBranch": "...",
+          "discountRate": 0.052, "stockCode": "601336"}, ...]
+    """
+    token = _token()
+    endpoint = f"{LIXINGER_BASE}/cn/company/block-deal"
+    body = {
+        "token": token,
+        "stockCode": stock_code,
+        "startDate": start_date,
+        "endDate": end_date,
+        "limit": limit,
+    }
+
+    cache_key = f"block_deal__{stock_code}__{start_date}_{end_date}"
+    return _cached(cache_key, lambda: _do_block_deal_fetch(endpoint, body),
+                   ttl=24 * 60 * 60) or []
+
+
+def fetch_restricted_release(stock_codes: list[str]) -> list[dict]:
+    """获取限售解禁热度数据 (v2.16 · 替代 akshare 全 A 解禁日历).
+
+    Args:
+        stock_codes: 股票代码列表 (1-100)
+
+    Returns:
+        [{"stockCode": "601336", "last_data_date": "...", "srl_last": ...,
+          "srl_cap_r_last": ..., "elr_s_y1": ..., "elr_s_cap_r_y1": ...,
+          "elr_mc_y1": ...}, ...]
+    """
+    token = _token()
+    endpoint = f"{LIXINGER_BASE}/cn/company/hot/elr"
+    body = {"token": token, "stockCodes": stock_codes}
+    cache_key = f"hot_elr__{'_'.join(stock_codes[:5])}"
+    return _cached(cache_key, lambda: _do_simple_fetch(endpoint, body),
+                   ttl=24 * 60 * 60) or []
+
+
+def fetch_margin_trading(stock_codes: list[str]) -> list[dict]:
+    """获取融资融券热度数据 (v2.16 · 替代 akshare 全市场融资明细).
+
+    Args:
+        stock_codes: 股票代码列表 (1-100)
+
+    Returns:
+        [{"stockCode": "601336", "last_data_date": "...", "spc": ...,
+          "mtaslb_fb": ..., "mtaslb_sb": ..., "mtaslb": ...,
+          "mtaslb_mc_r": ..., "mtaslb_fbc": ..., "mtaslb_smc": ...,
+          "npa_o_f_d1/5/20/60/120/240": ..., ...}, ...]
+    """
+    token = _token()
+    endpoint = f"{LIXINGER_BASE}/cn/company/hot/mtasl"
+    body = {"token": token, "stockCodes": stock_codes}
+    cache_key = f"hot_mtasl__{'_'.join(stock_codes[:5])}"
+    return _cached(cache_key, lambda: _do_simple_fetch(endpoint, body),
+                   ttl=24 * 60 * 60) or []
+
+
+def _do_simple_fetch(endpoint: str, body: dict) -> list[dict]:
+    """Execute simple POST (no flattening needed) and return data rows."""
+    resp = _post(endpoint, body)
+    if not resp:
+        return []
+    return resp.get("data", [])
+
+
+def fetch_lhb_records(stock_code: str, start_date: str = "2025-01-01",
+                      end_date: str = "2026-12-31", limit: int = 50) -> list[dict]:
+    """获取单只股票龙虎榜记录 (v2.16 · 替代 akshare 全市场龙虎榜统计).
+
+    Returns:
+        [{"date": "...", "reasonForDisclosure": "...",
+          "buyList": [{"branchName": "...", "buyAmount": ..., "sellAmount": ...}],
+          "sellList": [...], "institutionBuyAmount": ..., "institutionSellAmount": ...,
+          "institutionNetPurchaseAmount": ..., "totalPurchaseAmount": ...,
+          "totalSellAmount": ..., "totalNetPurchaseAmount": ...}, ...]
+    """
+    token = _token()
+    endpoint = f"{LIXINGER_BASE}/cn/company/trading-abnormal"
+    body = {
+        "token": token, "stockCode": stock_code,
+        "startDate": start_date, "endDate": end_date, "limit": limit,
+    }
+    cache_key = f"lhb__{stock_code}__{start_date}_{end_date}"
+    return _cached(cache_key, lambda: _do_simple_fetch(endpoint, body),
+                   ttl=24 * 60 * 60) or []
+
+
+def fetch_fund_shareholders(stock_code: str, start_date: str = "2024-01-01",
+                            end_date: str = "2026-12-31", limit: int = 50) -> list[dict]:
+    """获取公募基金持股明细 (v2.16 · 替代 akshare 全市场基金持仓批量).
+
+    Returns:
+        [{"date": "2026-03-31", "fundCode": "...", "name": "招商中证白酒指数A",
+          "holdings": 40257055, "marketCap": ..., "marketCapRank": ...,
+          "netValueRatio": 0.1432, "outstandingSharesA": ...,
+          "proportionOfCapitalization": ...}, ...]
+    """
+    token = _token()
+    endpoint = f"{LIXINGER_BASE}/cn/company/fund-shareholders"
+    body = {
+        "token": token, "stockCode": stock_code,
+        "startDate": start_date, "endDate": end_date, "limit": limit,
+    }
+    cache_key = f"fund_sh__{stock_code}__{start_date}_{end_date}"
+    return _cached(cache_key, lambda: _do_simple_fetch(endpoint, body),
+                   ttl=24 * 60 * 60) or []
+
+
+def fetch_shareholders_num(stock_code: str, start_date: str = "2023-01-01",
+                           end_date: str = "2026-12-31", limit: int = 20) -> list[dict]:
+    """获取股东人数历史 (v2.16 · 替代 akshare 全市场股东户数批量 — 842 tqdm 终结者).
+
+    Returns:
+        [{"date": "2023-12-31", "total": 85775,
+          "shareholdersNumberChangeRate": 0.0995, "spc": -0.1548}, ...]
+    """
+    token = _token()
+    endpoint = f"{LIXINGER_BASE}/cn/company/shareholders-num"
+    body = {
+        "token": token, "stockCode": stock_code,
+        "startDate": start_date, "endDate": end_date, "limit": limit,
+    }
+    cache_key = f"sh_num__{stock_code}__{start_date}_{end_date}"
+    return _cached(cache_key, lambda: _do_simple_fetch(endpoint, body),
+                   ttl=24 * 60 * 60) or []
+
+
+def _do_block_deal_fetch(endpoint: str, body: dict) -> list[dict]:
+    """Execute block-deal POST and normalize dates to YYYY-MM-DD."""
+    resp = _post(endpoint, body)
+    if not resp:
+        return []
+    rows = resp.get("data", [])
+    out = []
+    for r in rows:
+        d = r.get("date", "")
+        if isinstance(d, str) and "T" in d:
+            d = d[:10]
+        out.append({
+            "date": d,
+            "stockCode": r.get("stockCode", ""),
+            "tradingPrice": r.get("tradingPrice"),
+            "tradingAmount": r.get("tradingAmount"),
+            "tradingVolume": r.get("tradingVolume"),
+            "buyBranch": r.get("buyBranch", ""),
+            "sellBranch": r.get("sellBranch", ""),
+            "discountRate": r.get("discountRate"),
+        })
+    return out

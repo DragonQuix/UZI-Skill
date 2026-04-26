@@ -12,6 +12,7 @@ import sys
 
 import akshare as ak  # type: ignore
 from lib import data_sources as ds
+from lib.lixinger_client import fetch_lhb_records  # v2.16 · 理杏仁单股龙虎榜替代全市场统计
 from lib.market_router import parse_ticker
 from lib.seat_db import match_seats_in_lhb
 
@@ -62,7 +63,37 @@ def main(ticker: str) -> dict:
     if ti.market != "A":
         return {"ticker": ti.full, "data": {"_note": "lhb only A-share"}, "source": "skip", "fallback": False}
 
-    lhb = ds.fetch_lhb_recent(ti, days=30)
+    # v2.16 · 理杏仁龙虎榜优先 (单股查询 < 7s)，akshare 兜底
+    lhb = []
+    source_used = "akshare:stock_lhb_stock_detail_em"
+    try:
+        from datetime import datetime as _dt, timedelta as _td
+        end_d = _dt.now().strftime("%Y-%m-%d")
+        start_d = (_dt.now() - _td(days=90)).strftime("%Y-%m-%d")
+        lx_lhb = fetch_lhb_records(ti.code, start_date=start_d, end_date=end_d, limit=50)
+        if lx_lhb:
+            # Normalize to akshare-like format for downstream seat matching
+            for r in lx_lhb:
+                buy_total = sum(b.get("buyAmount", 0) or 0 for b in r.get("buyList", []))
+                sell_total = sum(s.get("sellAmount", 0) or 0 for s in r.get("sellList", []))
+                lhb.append({
+                    "上榜日期": str(r.get("date", ""))[:10],
+                    "解读": r.get("reasonForDisclosure", ""),
+                    "买入金额": r.get("institutionBuyAmount") or buy_total or 0,
+                    "卖出金额": r.get("institutionSellAmount") or sell_total or 0,
+                    "净买额": r.get("institutionNetPurchaseAmount") or 0,
+                    "_lx_raw": r,
+                })
+            source_used = "lixinger:cn/company/trading-abnormal"
+    except Exception:
+        pass
+
+    # Fallback to akshare if Lixinger returned nothing
+    if not lhb:
+        lhb = ds.fetch_lhb_recent(ti, days=30)
+    else:
+        source_used += " + akshare:stock_lhb_stock_detail_em (fallback not used)"
+
     matched = match_seats_in_lhb(lhb)
     split = split_inst_vs_youzi(lhb)
 
@@ -80,7 +111,7 @@ def main(ticker: str) -> dict:
             "sector_lhb_top50": sector[:30],
             "sector_leader_hint": sector[0]["代码"] if sector and "代码" in sector[0] else None,
         },
-        "source": "akshare:stock_lhb_stock_detail_em + statistic + seat_db",
+        "source": source_used,
         "fallback": False,
     }
 

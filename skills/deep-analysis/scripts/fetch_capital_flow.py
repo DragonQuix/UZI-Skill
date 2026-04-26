@@ -17,6 +17,13 @@ import sys
 import akshare as ak  # type: ignore
 from lib import data_sources as ds
 from lib.cache import cached  # v2.15.3 · TTL cache
+from lib.lixinger_client import (  # v2.16 · 理杏仁单股查询替代全A批量
+    fetch_block_deals,
+    fetch_restricted_release,
+    fetch_margin_trading,
+    fetch_fund_shareholders,  # v2.16 · 公募基金持股替代全市场基金持仓批量
+    fetch_shareholders_num,   # v2.16 · 股东人数替代全市场股东户数 (842 tqdm 终结者)
+)
 from lib.market_router import parse_ticker
 
 
@@ -129,94 +136,126 @@ def main(ticker: str) -> dict:
 
     north = ds.fetch_northbound(ti)
 
-    # v2.15.3 · 融资明细走 universe cache · 按 exchange 缓存全市场最新一天
-    exchange = "SZ" if ti.full.endswith("SZ") else "SSE"
-    universe_margin = _universe_margin_detail(exchange)
-    # head(5) 保留原行为（展示市场层 top 5 · 非本股过滤）
-    margin = universe_margin[:5] if universe_margin else []
+    # 融资融券 · v2.16 · 理杏仁单股查询替代全市场批量
+    try:
+        margin_raw = fetch_margin_trading([ti.code])
+        margin = [
+            {
+                "日期": str(r.get("last_data_date", ""))[:10],
+                "融资余额": r.get("mtaslb_fb"),
+                "融券余额": r.get("mtaslb_sb"),
+                "两融余额": r.get("mtaslb"),
+                "占流通市值": f"{r.get('mtaslb_mc_r', 0) * 100:.2f}%" if r.get("mtaslb_mc_r") else "—",
+                "20日净买入": r.get("npa_o_f_d20"),
+                "60日净买入": r.get("npa_o_f_d60"),
+                "涨跌幅": f"{r.get('spc', 0) * 100:.1f}%" if r.get("spc") else "—",
+            }
+            for r in (margin_raw or [])[:5]
+        ]
+    except Exception:
+        margin = []
 
-    holders = _safe(
-        lambda: ak.stock_zh_a_gdhs(symbol=ti.code).head(8).to_dict("records"),
-        [],
-    )
+    # 股东户数 · v2.16 · 理杏仁单股查询替代全市场批量 (842 tqdm 终结者!)
+    holders = []
+    try:
+        sh_raw = fetch_shareholders_num(ti.code, start_date="2023-01-01", limit=16)
+        holders = [
+            {
+                "日期": str(r.get("date", ""))[:10],
+                "股东户数": r.get("total"),
+                "股东户数变化率": f"{r.get('shareholdersNumberChangeRate', 0) * 100:.1f}%" if r.get("shareholdersNumberChangeRate") else "—",
+                "涨跌幅": r.get("spc"),
+            }
+            for r in (sh_raw or [])
+        ]
+    except Exception:
+        holders = []
 
     main_flow = _safe(
         lambda: ak.stock_individual_fund_flow(stock=ti.code, market=ti.full[-2:].lower()).tail(20).to_dict("records"),
         [],
     )
 
-    # 大宗交易 · v2.15.3 · 走 universe cache · 只 filter 本股（原每次 3+min 重抓全 A）
+    # 大宗交易 · v2.16 · 理杏仁单股查询替代全A批量 (from 180s → <1s)
     try:
-        universe_dzjy = _universe_dzjy(2026)
-        block_trades = [r for r in universe_dzjy if r.get("证券代码") == ti.code][:20]
+        from datetime import datetime as _dt, timedelta as _td
+        end_d = _dt.now().strftime("%Y-%m-%d")
+        start_d = (_dt.now() - _td(days=365)).strftime("%Y-%m-%d")
+        block_trades_raw = fetch_block_deals(ti.code, start_date=start_d, end_date=end_d)
+        block_trades = [
+            {
+                "日期": r.get("date", ""),
+                "成交价": r.get("tradingPrice"),
+                "成交额": r.get("tradingAmount"),
+                "成交量": r.get("tradingVolume"),
+                "买方营业部": r.get("buyBranch", ""),
+                "卖方营业部": r.get("sellBranch", ""),
+                "折价率": f"{r.get('discountRate', 0) * 100:.1f}%" if r.get("discountRate") else "—",
+            }
+            for r in (block_trades_raw or [])[:20]
+        ]
     except Exception:
         block_trades = []
 
-    # 限售股解禁 (近一年) · v2.15.3 · universe cache
+    # 限售股解禁 · v2.16 · 理杏仁单股查询替代全A批量 (消除 841 条目!)
     try:
-        universe_release = _universe_release_summary()
-        unlock = [r for r in universe_release if r.get("代码") == ti.code]
+        release_raw = fetch_restricted_release([ti.code])
+        unlock = [
+            {
+                "代码": r.get("stockCode", ""),
+                "最近解禁日": str(r.get("last_data_date", ""))[:10],
+                "最近解禁股数": r.get("srl_last"),
+                "占总股本": f"{r.get('srl_cap_r_last', 0) * 100:.2f}%" if r.get("srl_cap_r_last") else "—",
+                "未来1年解禁股数": r.get("elr_s_y1"),
+                "未来1年解禁市值": r.get("elr_mc_y1"),
+            }
+            for r in (release_raw or [])
+        ]
     except Exception:
         unlock = []
 
-    # 解禁日历前瞻 12 个月 · v2.15.3 · universe cache
-    try:
-        universe_detail = _universe_release_detail(2026)
-        unlock_future = [r for r in universe_detail if r.get("代码") == ti.code][:20]
-    except Exception:
-        unlock_future = []
-
-    # Normalize unlock_schedule for viz
-    def _month_label(d):
-        s = str(d)[:7].replace("-", "")
-        if len(s) == 6:
-            return f"{s[2:4]}-{s[4:6]}"
-        return s[-5:] if s else "—"
-
+    # 解禁日历 · v2.16 · 从理杏仁 unlock 数据构造 schedule (已无明细逐日数据，
+    # 仅有汇总。保留 schedule 字段但用汇总值填充)
     unlock_schedule = []
-    for row in (unlock_future or [])[:12]:
-        date = row.get("解禁日期") or row.get("解禁时间") or ""
-        amount_str = row.get("解禁市值") or row.get("市值(亿元)") or row.get("解禁股份数量") or 0
-        try:
-            amount = float(str(amount_str).replace(",", ""))
-            # 如果原始单位是元而非亿，做换算
-            if amount > 1e6:
-                amount = amount / 1e8
-            unlock_schedule.append({"date": _month_label(date), "amount": round(amount, 2)})
-        except (ValueError, TypeError):
-            pass
+    for row in unlock:
+        if row.get("最近解禁日"):
+            unlock_schedule.append({
+                "date": str(row["最近解禁日"])[:7],
+                "amount": round((row.get("未来1年解禁市值") or 0) / 1e8, 2),
+            })
 
-    # 机构持仓 8 季度历史 (stock_report_fund_hold_detail)
-    inst_history: dict = {"quarters": [], "fund": [], "qfii": [], "shehui": []}
+    # 机构持仓 · v2.16 · 理杏仁公募基金持股替代全市场基金持仓批量 (消除 842 条目!)
+    inst_history: dict = {"quarters": [], "fund": [], "top_funds": []}
     try:
         from datetime import datetime as _dt, timedelta as _td
-        # Get last 8 quarters
-        today = _dt.now()
-        quarters = []
-        for i in range(8):
-            y = today.year
-            q = ((today.month - 1) // 3) - i
-            while q < 0:
-                q += 4
-                y -= 1
-            q_dates = ["0331", "0630", "0930", "1231"]
-            quarters.append((f"{y}{q_dates[q]}", f"{str(y)[2:]}Q{q+1}"))
-        quarters.reverse()
-        inst_history["quarters"] = [q[1] for q in quarters]
-
-        for q_date, q_label in quarters:
-            fund_pct = qfii_pct = shehui_pct = 0.0
-            try:
-                df_fund = ak.stock_report_fund_hold_detail(symbol="基金持仓", date=q_date)
-                if df_fund is not None and not df_fund.empty and "股票代码" in df_fund.columns:
-                    sub = df_fund[df_fund["股票代码"].astype(str) == ti.code]
-                    if not sub.empty and "占流通股比例" in sub.columns:
-                        fund_pct = float(sub["占流通股比例"].sum())
-            except Exception:
-                pass
-            inst_history["fund"].append(round(fund_pct, 2))
-            inst_history["qfii"].append(round(qfii_pct, 2))
-            inst_history["shehui"].append(round(shehui_pct, 2))
+        end_d = _dt.now().strftime("%Y-%m-%d")
+        start_d = (_dt.now() - _td(days=730)).strftime("%Y-%m-%d")
+        fund_data = fetch_fund_shareholders(ti.code, start_date=start_d, end_date=end_d, limit=100)
+        if fund_data:
+            by_quarter: dict[str, dict] = {}
+            for r in fund_data:
+                d = str(r.get("date", ""))[:7]
+                by_quarter.setdefault(d, {"total_holdings": 0, "fund_count": 0, "top": []})
+                h = r.get("holdings") or 0
+                by_quarter[d]["total_holdings"] += h
+                by_quarter[d]["fund_count"] += 1
+                by_quarter[d]["top"].append({
+                    "name": r.get("name", ""),
+                    "holdings": h,
+                    "net_value_ratio": r.get("netValueRatio"),
+                })
+            sorted_qs = sorted(by_quarter.keys())[-8:]
+            inst_history["quarters"] = sorted_qs
+            for q in sorted_qs:
+                qd = by_quarter[q]
+                inst_history["fund"].append(round(qd["total_holdings"] / 1e4, 2))
+            latest_q = sorted_qs[-1] if sorted_qs else None
+            if latest_q:
+                inst_history["top_funds"] = sorted(
+                    by_quarter[latest_q]["top"], key=lambda x: x["holdings"], reverse=True
+                )[:10]
+        if not inst_history["quarters"]:
+            inst_history["quarters"] = ["无数据"]
     except Exception:
         pass
 
@@ -245,12 +284,10 @@ def main(ticker: str) -> dict:
     def _holders_trend(h):
         if not h or len(h) < 2:
             return "—"
-        last = h[0]  # gdhs 接口通常最新在前
-        prev = h[-1]
         try:
-            l = float(str(last.get("股东户数", 0)).replace(",", ""))
-            p = float(str(prev.get("股东户数", 0)).replace(",", ""))
-            trend = "3 季连降" if l < p * 0.95 else "3 季连升" if l > p * 1.05 else "基本持平"
+            last = float(str(h[0].get("股东户数", 0)).replace(",", ""))
+            prev = float(str(h[-1].get("股东户数", 0)).replace(",", ""))
+            trend = "3 季连降" if last < prev * 0.95 else "3 季连升" if last > prev * 1.05 else "基本持平"
             return trend
         except Exception:
             return "—"

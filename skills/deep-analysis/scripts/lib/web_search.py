@@ -1,7 +1,7 @@
 """Unified web search wrapper with caching + fallback chain.
 
-Primary: ddgs (DuckDuckGo) — free, no key, works in China via proxy
-Fallback: (future) Tavily / Serper if API keys present
+Primary: Exa API — clean structured results, no DDGS noise/garbage
+Fallback: ddgs (DuckDuckGo) — free, no key needed, works via proxy
 
 All searches go through lib/cache.py so repeated queries are cheap (12h TTL).
 """
@@ -13,6 +13,14 @@ from typing import Callable, Optional
 
 from .cache import cached, TTL_HOURLY
 
+# Exa (primary)
+try:
+    from .exa_client import search as _exa_api_search
+    _EXA_OK = True
+except Exception:
+    _EXA_OK = False
+
+# DDGS (fallback)
 try:
     from ddgs import DDGS  # type: ignore
     _DDGS_OK = True
@@ -109,6 +117,37 @@ def trusted_domains_for(dim_key: str) -> tuple[str, ...]:
     return TRUSTED_DOMAINS_BY_DIM.get(dim_key, ())
 
 
+def _exa_search(query: str, max_results: int = 10, include_domains: Optional[list[str]] = None) -> list[dict]:
+    """Exa search with field normalization to DDGS-compatible format."""
+    if not _EXA_OK:
+        return [{"error": "exa: module not available"}]
+    try:
+        results = _exa_api_search(
+            query, num_results=max_results, include_domains=include_domains,
+        )
+    except Exception as e:
+        return [{"error": f"exa: {type(e).__name__}: {str(e)[:120]}"}]
+    # Already normalized by exa_client: {title, body, url, source: "exa"}
+    return results
+
+
+def _exa_search_trusted(query: str, dim_key: str, max_results: int = 8,
+                       extra_domains: tuple[str, ...] = ()) -> list[dict]:
+    """Exa search with domain whitelist from TRUSTED_DOMAINS_BY_DIM.
+
+    Unlike DDGS which uses `site:` syntax, Exa has native `includeDomains` parameter
+    — cleaner and more reliable.
+    """
+    domains = list(trusted_domains_for(dim_key))
+    if extra_domains:
+        domains += list(extra_domains)
+    # Cap at 6 domains to avoid overly restrictive queries
+    domains = domains[:6]
+    if not domains:
+        return _exa_search(query, max_results=max_results)
+    return _exa_search(query, max_results=max_results, include_domains=domains)
+
+
 def _ddg_search(query: str, max_results: int = 10, region: str = "cn-zh") -> list[dict]:
     """v2.10.2 · 加硬超时保护（代理/GFW 挂时卡 60s+ 的核心原因）."""
     if not _DDGS_OK:
@@ -160,17 +199,23 @@ def _is_garbage_result(r: dict) -> bool:
 def search(query: str, max_results: int = 10, cache_key_prefix: str = "ws") -> list[dict]:
     """Perform a cached web search. Returns list of {title, body, url, source}.
 
-    Includes a quality filter to remove dictionary/Wikipedia garbage results
-    that match Chinese character definitions instead of stock analysis.
+    Tries Exa API first (clean structured results), falls back to DDGS.
+    Includes a quality filter to remove dictionary/Wikipedia garbage results.
 
     v2.10.1 · 命中 cache 的不占预算；未命中 cache 时检查 UZI_DDG_BUDGET 预算。
+    v2.16 · Exa 为主搜索后端，DDGS 仅 fallback。
     """
     key = f"{cache_key_prefix}__{query[:100]}__n{max_results}"
 
-    # 先检查 cache 是否命中 —— 命中不占预算
-    from lib.cache import cached, TTL_HOURLY  # re-import for scope
-    # 自定义：先看 cache 有没有，没 cache 时查预算
     def _fetcher():
+        # Try Exa first
+        if _EXA_OK:
+            results = _exa_search(query, max_results=max_results)
+            if results and not any("error" in r for r in results):
+                return results
+        # Fall back to DDGS
+        if not _DDGS_OK:
+            return [{"error": "search: no backend available (Exa unavailable, DDGS not installed)"}]
         if not _budget_allows():
             _budget_mark_skipped()
             return [{"_budget_exceeded": True,
@@ -191,8 +236,8 @@ def search_trusted(
 ) -> list[dict]:
     """v2.7.3 · site: 限定在 dim 对应的权威域里搜索。
 
-    把 query 与 `(site:d1 OR site:d2 ...)` 组合发给 ddgs，返回结果只来自权威
-    媒体 / 官方网站。大幅减少百科/词典/小红书广告噪声，显著提升定性维度质量。
+    v2.16 · Exa 模式下用 native includeDomains 替代 DDGS site: 语法，
+    更可靠、更干净。DDGS fallback 仍使用 site: 拼接。
 
     示例：
         search_trusted("贵州茅台 2026 Q1 业绩", dim_key="15_events")
@@ -200,10 +245,10 @@ def search_trusted(
 
     参数：
       query: 用户查询
-      dim_key: 维度 key（"3_macro" / "15_events" / ...）决定 site: 白名单
+      dim_key: 维度 key（"3_macro" / "15_events" / ...）决定权威域白名单
       max_results: 总条数上限
       extra_sites: 追加域（比如特定行业要加自建站点）
-      max_sites: OR 里最多拼几个域（过多会超过搜索引擎 query 长度）
+      max_sites: 最多几个域（Exa 用 includeDomains，DDGS 用 site: OR 拼）
 
     返回：与 search() 一致的 list[dict]。若 dim 无映射，回退到普通 search。
     """
@@ -212,11 +257,21 @@ def search_trusted(
         domains = tuple(list(domains) + list(extra_sites))
     if not domains:
         return search(query, max_results=max_results)
-    # 截断到 max_sites
     domains = domains[:max_sites]
+
+    # Exa path: native domain filtering, separate cache key
+    if _EXA_OK:
+        key = f"wst_exa_{dim_key}__{query[:80]}__n{max_results}"
+        def _fetcher():
+            return _exa_search_trusted(query, dim_key, max_results=max_results,
+                                       extra_domains=extra_sites)
+        raw = cached("_global", key, _fetcher, ttl=_SEARCH_TTL)
+        if raw and not any("error" in r for r in raw):
+            return [r for r in raw if not _is_garbage_result(r)]
+
+    # DDGS fallback: site: clause
     site_clause = " OR ".join(f"site:{d}" for d in domains)
     combined = f"({site_clause}) {query}"
-    # 独立 cache_key_prefix，避免和普通 search 撞 cache
     return search(combined, max_results=max_results, cache_key_prefix=f"wst_{dim_key}")
 
 
