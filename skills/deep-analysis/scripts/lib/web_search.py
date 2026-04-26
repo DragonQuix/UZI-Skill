@@ -32,10 +32,11 @@ _SEARCH_TTL = 12 * 60 * 60  # 12h — news can update but we don't need bleeding
 
 
 # ═══════════════════════════════════════════════════════════════
-# v2.10.1 · 全局 ddgs 预算（防止首次跑爆炸 + Codex token 消耗过大）
+# v2.10.1 · 全局搜索预算（防止首次跑爆炸 + 搜索配额消耗过大）
+# v3.0   · 重命名为 UZI_SEARCH_BUDGET（Exa 为主后 ddgs 已非常规路径）
 # ═══════════════════════════════════════════════════════════════
 # UZI_LITE=1 时 search() 进入严格预算模式：全生命周期最多 N 次真实搜索
-# （命中 cache 的不计）。超出后直接返空，agent 会看到空结果知道走备选。
+# （命中 cache 的不计）。Exa 和 ddgs 共享同一预算配额。
 import threading as _threading
 _BUDGET_LOCK = _threading.Lock()
 _BUDGET_STATE = {"used": 0, "skipped": 0}
@@ -43,7 +44,8 @@ _BUDGET_STATE = {"used": 0, "skipped": 0}
 
 def _budget_allows() -> bool:
     import os
-    cap_raw = os.environ.get("UZI_DDG_BUDGET")
+    # v3.0 · UZI_SEARCH_BUDGET 优先，fallback UZI_DDG_BUDGET 向后兼容
+    cap_raw = os.environ.get("UZI_SEARCH_BUDGET") or os.environ.get("UZI_DDG_BUDGET")
     if not cap_raw:
         return True  # 未设预算 = 无限
     try:
@@ -208,18 +210,19 @@ def search(query: str, max_results: int = 10, cache_key_prefix: str = "ws") -> l
     key = f"{cache_key_prefix}__{query[:100]}__n{max_results}"
 
     def _fetcher():
+        if not _budget_allows():
+            _budget_mark_skipped()
+            return [{"_budget_exceeded": True,
+                     "body": "全局搜索预算已用尽（UZI_SEARCH_BUDGET），agent 请用 cached / hardcoded 数据"}]
         # Try Exa first
         if _EXA_OK:
             results = _exa_search(query, max_results=max_results)
             if results and not any("error" in r for r in results):
+                _budget_mark_used()
                 return results
         # Fall back to DDGS
         if not _DDGS_OK:
             return [{"error": "search: no backend available (Exa unavailable, DDGS not installed)"}]
-        if not _budget_allows():
-            _budget_mark_skipped()
-            return [{"_budget_exceeded": True,
-                     "body": "全局 ddgs 预算已用尽（UZI_DDG_BUDGET），agent 请用 cached / hardcoded 数据"}]
         _budget_mark_used()
         return _ddg_search(query, max_results=max_results)
 

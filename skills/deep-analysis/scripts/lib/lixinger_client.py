@@ -395,6 +395,22 @@ def fetch_company_info(stock_code: str, market: str = "cn") -> dict | None:
     return _cached(cache_key, lambda: _do_fetch(endpoint, body), ttl=7 * 24 * 60 * 60)
 
 
+def fetch_industries(stock_code: str, market: str = "cn") -> str | None:
+    """获取股票所属行业名称（申万/中信分类）。
+
+    POST /api/cn/company/industries · 返回如 "石油石化" / "食品饮料"
+    缓存 7 天（行业分类极少变动）。
+    """
+    endpoint = f"{LIXINGER_BASE}/{market}/company/industries"
+    body = {"token": _token(), "stockCode": stock_code}
+    cache_key = f"industries__{market}__{stock_code}"
+    rows = _cached(cache_key, lambda: _do_simple_fetch(endpoint, body),
+                   ttl=7 * 24 * 60 * 60)
+    if rows:
+        return (rows[0] or {}).get("name")
+    return None
+
+
 # ── internal ───────────────────────────────────────────────────────
 def _do_fetch(endpoint: str, body: dict) -> dict | None:
     """Execute POST, parse nested response rows into flat indexed structure.

@@ -1075,7 +1075,7 @@ except ImportError:
 def _autofill_qualitative_via_mx(raw: dict, ticker: str) -> None:
     """v2.6.1 · 自动补齐 6 个定性维度的空字段（in-place 修改 raw['dimensions']）.
 
-    优先级：MX 妙想 API → ddgs WebSearch → 显式标记 autofill_failed。
+    优先级：MX 妙想 API → Exa → DDGS → 显式标记 autofill_failed。
     适用场景：直跑模式（无 agent 介入），fetcher 拿到空数据时不能让报告也空。
 
     v2.12.1 加入 _is_junk_autofill 质量过滤 · 垃圾数据（"类型；类型" 等）不写入字段.
@@ -1085,14 +1085,15 @@ def _autofill_qualitative_via_mx(raw: dict, ticker: str) -> None:
     except ImportError:
         MXClient = None
     try:
-        from lib.web_search import search as _ws_search
+        from lib.web_search import search as _ws_search, _EXA_OK as _exa_ok
     except ImportError:
         _ws_search = None
+        _exa_ok = False
 
     client = MXClient() if MXClient else None
     mx_ok = client is not None and client.available
     if not mx_ok and not _ws_search:
-        print("   ⚠️ MX_APIKEY 未设置且 ddgs 不可用，跳过自动兜底")
+        print("   ⚠️ MX_APIKEY 未设置且搜索后端不可用，跳过自动兜底")
         return
 
     dims = raw.get("dimensions", {})
@@ -1157,7 +1158,7 @@ def _autofill_qualitative_via_mx(raw: dict, ticker: str) -> None:
             except Exception:
                 pass
 
-        # 回退 ddgs WebSearch
+        # 回退 Exa → DDGS WebSearch
         if not text and _ws_search:
             try:
                 results = _ws_search(query, max_results=3) or []
@@ -1169,11 +1170,10 @@ def _autofill_qualitative_via_mx(raw: dict, ticker: str) -> None:
                         if title or body:
                             snippets.append(f"{title} — {body[:80]}".strip(" —"))
                 text = "；".join(snippets)[:300]
-                # v2.12.1 · 过滤 ddgs 拼接后的噪音（长度过短 / 模板占位符）
                 if _is_junk_autofill(text):
                     text = ""
                 if text:
-                    source_used = "ddgs"
+                    source_used = "exa" if _exa_ok else "ddgs"
             except Exception:
                 pass
 
@@ -1622,11 +1622,14 @@ def _detect_lite_mode() -> tuple[bool, str]:
         return False, "UZI_LITE=0 显式关闭"
     # auto 模式：检测 _global api_cache 是否为空（首次安装判定）
     global_cache = Path(".cache/_global/api_cache")
+    _exa_ok = bool(os.environ.get("EXA_API_KEY", "").strip())
     if not global_cache.exists():
-        return True, "首次安装（.cache/_global 不存在）自动 lite"
+        extra = " · Exa 可用（search budget=15）" if _exa_ok else ""
+        return True, f"首次安装（.cache/_global 不存在）自动 lite{extra}"
     try:
         if len(list(global_cache.iterdir())) < 5:
-            return True, "cache 非常冷（_global/api_cache 条目 < 5）自动 lite"
+            extra = " · Exa 可用（search budget=15）" if _exa_ok else ""
+            return True, f"cache 非常冷（_global/api_cache 条目 < 5）自动 lite{extra}"
     except Exception:
         pass
     return False, "cache 已预热，full mode"
@@ -1664,12 +1667,11 @@ def stage1(ticker: str) -> dict:
     is_lite, lite_reason = _detect_lite_mode()
     if is_lite:
         os.environ["UZI_LITE"] = "1"  # 下游 fetcher 能读
-        os.environ.setdefault("UZI_DDG_BUDGET", "15")  # 全局 ddgs 预算上限
+        os.environ.setdefault("UZI_SEARCH_BUDGET", "15")  # 全局搜索预算上限（Exa + ddgs）
         print(f"\n⚡ LITE MODE: {lite_reason}")
-        print(f"   · 跳过 fetch_macro/policy/moat 的 ddgs 查询（返回空让 agent 自己补）")
-        print(f"   · fetch_industry 跳过动态景气度查询（省 3-9 次 ddgs）")
+        print(f"   · 跳过 13 个 enrichment 维度（返回空让 agent 自己补）")
         print(f"   · wave3 fund_holders 默认 top 20（UZI_FUND_LIMIT=all 可覆盖）")
-        print(f"   · 全局 ddgs 预算 15 次/ticker（超出自动 skip）")
+        print(f"   · 全局搜索预算 15 次/ticker · Exa 优先（超出自动 skip）")
         print(f"   · 完整跑请 UZI_LITE=0 && python run.py <ticker>\n")
     # v2.3 · 中文名解析 — 支持纠错提示。若输入无法明确解析，早退并返回候选，不继续跑 22 fetcher。
     from lib.market_router import is_chinese_name

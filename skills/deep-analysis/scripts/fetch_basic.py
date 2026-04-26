@@ -82,6 +82,7 @@ def main(user_input: str) -> dict:
         if os.environ.get("LIXINGER_TOKEN", "").strip():
             try:
                 from lib.lixinger_client import fetch_company_info as lx_company
+                from lib.lixinger_client import fetch_industries as lx_industry
                 market = "hk" if ti.market == "H" else "cn"
                 code = ti.code.zfill(5) if market == "hk" else ti.code
                 co = lx_company(code, market=market)
@@ -100,6 +101,13 @@ def main(user_input: str) -> dict:
                             if val is not None:
                                 data["_lx_" + label] = val
                         data["_lx_enriched"] = True
+                        # v3.0 · 理杏仁行业分类（申万/中信）
+                        try:
+                            lx_ind = lx_industry(code, market=market)
+                            if lx_ind:
+                                data["industry"] = lx_ind
+                        except Exception:
+                            pass  # 行业非致命，失败让雪球/东财 fallback 兜底
             except Exception:
                 pass  # non-critical, silently skip
 
