@@ -456,6 +456,73 @@ cp .env.example .env
 
 无 key 时全部回退到 XueQiu/akshare 链，现有用户零感知。
 
+### 🔑 推荐：理杏仁 Token + Exa API Key（refactor/v3.0.0-pipeline-architecture 分支新增）
+
+> **注意**：以下两个 key 仅在 `refactor/v3.0.0-pipeline-architecture` 分支（commit `09b144f` 起）生效。`main` 分支用户无需配置。
+
+两个 key 均为**可选**——不配置时自动降级，不会报错，功能完整可用。
+
+#### 理杏仁 Token（`LIXINGER_TOKEN`）
+
+用于**单股精确查询**，替代原 akshare 全 A 股批量拉取（大宗交易 / 限售解禁 / 融资融券 / 公募基金持股 / 股东人数 / 龙虎榜）。效果：
+
+| 数据项 | 无 Token（akshare 全市场拉取） | 有 Token（理杏仁单股查询） |
+|--------|------------------------------|--------------------------|
+| 大宗交易 | 拉取全年全 A 股数据（3min+），再从海量数据过滤本股 | 直接查本股，< 1 秒 |
+| 限售解禁 | 拉取全 A 解禁日历（841 条进度），~40 分钟理论耗时 | 直接查本股，< 1 秒 |
+| 融资融券 | 拉取全交易所融资明细，38 秒 | 直接查本股，< 1 秒 |
+| 公募基金持仓 | 每季度拉全市场基金持仓 × 8 季度，~440 秒 | 直接查本股，~5 秒 |
+| 股东人数 | 拉取全 A 股东户数，~120 秒 + 842 条进度条 | 直接查本股，~2 秒 |
+| 龙虎榜 | 拉取全 A 龙虎榜统计，133 秒 | 直接查本股，~6 秒 |
+
+配置（任选一种）：
+```bash
+# 方式一：永久生效（推荐）—— 加到 ~/.bashrc 或 ~/.zshrc
+export LIXINGER_TOKEN="你的理杏仁Token"
+
+# 方式二：会话级别 —— 每次开终端手动执行
+export LIXINGER_TOKEN="你的理杏仁Token"
+
+# 方式三：Windows 系统环境变量
+#   PowerShell: [Environment]::SetEnvironmentVariable('LIXINGER_TOKEN', '你的Token', 'User')
+#   注意设置后需重启终端
+```
+
+获取：https://www.lixinger.com/open/api/token（需注册理杏仁账号）
+
+**无 Token 时的表现**：全部回退到 akshare 全市场批量拉取，功能完整但 Stage 1 耗时增加约 3 倍。Wave2 可能出现 1-3 个维度因 300 秒超时标记为 fallback，覆盖率从 100% 降至约 94%。报告缺失维度会显示橙色徽章"数据需补充"。
+
+#### Exa API Key（`EXA_API_KEY`）
+
+用于**语义搜索**，替代 DuckDuckGo（DDGS）。Exa 返回结构化正文而非网页摘要片段。
+
+| 场景 | 无 Key（DDGS） | 有 Key（Exa） |
+|------|---------------|--------------|
+| 搜索速度 | 每条 4-23 秒，墙内代理不稳定 | 两步流程（搜索 → 正文），~2.5 秒/次 |
+| 结果质量 | 网页摘要片段，可能混入百科/字典噪声 | 结构化 Markdown 正文，准确度更高 |
+| 超时风险 | 网络不稳定时可能 timeout（默认 10 秒超时） | 15 秒超时，API 稳定性高 |
+
+配置（任选一种）：
+```bash
+# 方式一：永久生效（推荐）—— 加到 ~/.bashrc 或 ~/.zshrc
+export EXA_API_KEY="你的Exa API Key"
+
+# 方式二：Windows 系统环境变量
+#   PowerShell: [Environment]::SetEnvironmentVariable('EXA_API_KEY', '你的Key', 'User')
+```
+
+获取：https://exa.ai（需注册 Exa 账号）
+
+**无 Key 时的表现**：自动降级为 DDGS（DuckDuckGo）搜索，功能完整。墙内用户可能因代理不稳定遇到超时，可通过 `export UZI_DDG_TIMEOUT=30` 调大超时阈值。
+
+#### 两个 Key 都没有时的综合表现
+
+系统正常运行，所有 22 维分析完整可用。主要影响是速度：
+- Stage 1 Wave2 耗时从 ~240 秒增加到 ~660 秒（约 3 倍）
+- 可能出现 1-3 个维度因 timeout 自动走 fallback
+- 覆盖率从 100% 降至约 94%
+- 报告仍正常生成，fallback 维度标注橙色提示
+
 ### 🔓 需登录的数据源（v2.7.1 新增）
 
 部分数据源 2026 年起加了登录鉴权，UZI-Skill 默认**不主动弹登录窗**（保持无人值守）。
