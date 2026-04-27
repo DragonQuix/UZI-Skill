@@ -38,3 +38,9 @@ v2.10.4 起 CLI 直跑 `agent_analysis.json` 缺失自动降级 warning，照样
 - `skills/deep-analysis/SKILL.md` — 深度分析工作流
 - `skills/deep-analysis/scripts/run_real_test.py` — 主引擎
 - `commands/analyze-stock.md` — `/analyze-stock` 命令
+
+## 缓存数据结构速查
+
+- `raw_data.json`: `{ ticker, market, dimensions: { "1_financials": { data: {...}, source, fallback }, ... }, fund_managers: [...], similar_stocks: [...] }`
+- `dimensions.json`: `{ fundamental_score, dimensions: { "1_financials": { score, weight, label, reasons_pass, reasons_fail }, ... } }`
+- `panel.json`: `{ panel_consensus, vote_distribution, signal_distribution, investors: [{ investor_id, name, group, signal, score, headline, reasoning, verdict }] }`
