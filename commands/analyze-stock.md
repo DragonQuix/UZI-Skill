@@ -77,53 +77,58 @@ if low_quality_dims:
 
 对关键维度（财报/估值/护城河/行业）写 1-2 句定性评语。如果需要，web search 补充信息。
 
-把所有 agent 产出写入 `.cache/{ticker}/agent_analysis.json`：
+**⚠️ 必须使用模板 + API，禁止直接用 Path.write_text()：**
+
 ```python
-from lib.cache import write_task_output
-write_task_output(ticker, "agent_analysis", {
-    "agent_reviewed": True,
-    "dim_commentary": { "0_basic": "...", "1_financials": "...", ... },
-    "panel_insights": "整体评委观察...",
-    "great_divide_override": {
-        "punchline": "冲突金句",
-        "bull_say_rounds": ["R1", "R2", "R3"],
-        "bear_say_rounds": ["R1", "R2", "R3"]
-    },
-    "narrative_override": {
-        "core_conclusion": "综合结论",
-        "risks": ["风险1", "风险2", "风险3"],
-        "buy_zones": {
-            "value":      {"price": 17.50, "rationale": "DCF安全边际>50%，卡拉曼/格雷厄姆入场区"},
-            "growth":     {"price": 20.00, "rationale": "PEG<1 + 营收加速拐点，林奇/欧奈尔入场区"},
-            "technical":  {"price": 18.50, "rationale": "MA200支撑位 + 缩量止跌确认，利弗莫尔/米内尔维尼入场区"},
-            "youzi":      {"price": 0, "rationale": "非A股，游资不参与 — 设为0或skip"}
-        }
-    }
-})
+from lib.cache import agent_analysis_template, write_task_output
+
+# Step 1: 获取带注释的预填充模板（所有必填字段已就位）
+aa = agent_analysis_template(ticker, stock_name="山西汾酒")
+
+# Step 2: 填入实际值 — 只需替换【待填充】占位符
+aa["dim_commentary"]["1_financials"] = "ROE 33.5% 连续五年 > 15%，净利率 31.6%..."
+aa["panel_insights"] = "51 位评委中 12 人看多..."
+# ... 填充所有维度
+
+# Step 3: 写入（自动校验 schema，error 级阻断）
+write_task_output(ticker, "agent_analysis", aa)
 ```
 
+**模板已包含所有必填字段**：`buy_zones` 四派系 (value/growth/technical/youzi)、`qualitative_deep_dive` 6 维结构、`data_gap_acknowledged`。
+你只需替换 `【待填充】` 占位符，不用记字段名。
+
 ### 第三段 · 生成报告 + 自动补漏（v3.3 自愈循环）
+
+> ⚠️ 本段包含**不可跳过的强制步骤**。Stage 2 成功后必须立即执行第三步。
+
+**第一步 · 运行 stage2**
 
 ```bash
 python -c "from run_real_test import stage2; stage2('$ARGUMENTS')"
 ```
 
 stage2 会自动读取 panel.json + agent_analysis.json，合并生成最终报告。
-agent_analysis.json 中的字段优先级高于脚本 stub。
 
 **⚠️ 如果 stage2 因结构性错误失败（RuntimeError）**：
-读 `_agent_analysis_errors.json` → 逐条修复 → 重写 agent_analysis.json → 重跑 stage2。
+读 `_agent_analysis_errors.json` → 逐条修复 → 用 `write_task_output()` 重写 agent_analysis.json → 重跑 stage2。
 这些是可以在 1 分钟内修复的翻译错误（缺 key / 类型不对 / 字符串太短）。
 
-**📋 stage2 成功后，必须读 `.cache/{ticker}/_pending_improvements.json`**：
+**第二步 · 强制检查 pending（🔴 不可跳过）**
 
-```
+```python
 import json
-pending = json.loads(Path(f".cache/{ticker}/_pending_improvements.json").read_text(encoding="utf-8"))
+from pathlib import Path
+pending_path = Path(f".cache/{ticker}/_pending_improvements.json")
+if pending_path.exists():
+    pending = json.loads(pending_path.read_text(encoding="utf-8"))
+else:
+    pending = {}
 ```
 
-如果 `pending` 为空 → 直接跳到第四段汇报。
-如果 `pending` 非空 → **自主修复（不询问用户）**：
+- 如果 `pending` 为空 → **直接跳到第四段汇报**
+- 如果 `pending` 非空 → **必须执行第三步自主修复**，修复完成前不要向用户汇报
+
+**第三步 · 自主修复循环（🔴 不询问用户，最多 2 轮）**
 
 | pending key | 修复方式 |
 |---|---|
@@ -131,7 +136,13 @@ pending = json.loads(Path(f".cache/{ticker}/_pending_improvements.json").read_te
 | `qualitative_deep_dive_associations` | 基于已有的 agent 分析上下文，补写跨域因果链 |
 | `dim_commentary_coverage` | 读 raw_data.json 该维度数据 → 写 1-2 句定性评语（≥20 字） |
 
-修复后：重写 agent_analysis.json → 重跑 stage2 → 再次检查 pending。
+修复后必须执行：
+```python
+# ⚠️ 必须用 write_task_output，禁止直接 Path.write_text
+from lib.cache import write_task_output
+write_task_output(ticker, "agent_analysis", aa)  # aa 是你修复后的 dict
+```
+然后重跑 stage2 → 再次检查 pending。
 **最多 2 轮自愈循环。** 2 轮后无论是否完全修复都向用户汇报。
 
 ### 第四段 · 向用户汇报

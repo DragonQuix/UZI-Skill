@@ -80,6 +80,7 @@ def validate(agent_analysis: dict) -> list:
 
     # ── dim_commentary ──
     dc = agent_analysis.get("dim_commentary")
+    placeholder_count = 0
     if dc is not None:
         if not _is_dict(dc):
             _add(issues, "error", "dim_commentary",
@@ -95,13 +96,23 @@ def validate(agent_analysis: dict) -> list:
                     _add(issues, "warning", f"dim_commentary.{k}",
                          f"评语太短（{len(v.strip())} 字），低于 20 字门槛",
                          "至少写 1-2 句话，引用具体数字")
+                elif "【待填充】" in v or "【TODO】" in v:
+                    placeholder_count += 1
+                    _add(issues, "warning", f"dim_commentary.{k}",
+                         "评语包含占位符 '【待填充】' 或 '【TODO】'，未实际填写",
+                         "替换为基于 raw_data.json 的具体定性评语")
 
     # ── panel_insights ──
     pi = agent_analysis.get("panel_insights")
-    if pi is not None and not _is_str(pi, 30):
-        _add(issues, "warning", "panel_insights",
-             f"panel_insights 应是 30+ 字字符串，实际 {type(pi).__name__} / 长度 {len(str(pi))}",
-             "用一段话概括 51 评委的投票结构和主要分歧")
+    if pi is not None:
+        if not _is_str(pi, 30):
+            _add(issues, "warning", "panel_insights",
+                 f"panel_insights 应是 30+ 字字符串，实际 {type(pi).__name__} / 长度 {len(str(pi))}",
+                 "用一段话概括 51 评委的投票结构和主要分歧")
+        elif "【待填充】" in pi or "【TODO】" in pi:
+            _add(issues, "warning", "panel_insights",
+                 "panel_insights 包含占位符，未实际填写",
+                 "替换为 51 评委投票分布 + 多空分歧分析")
 
     # ── great_divide_override ──
     gdo = agent_analysis.get("great_divide_override")
@@ -112,10 +123,15 @@ def validate(agent_analysis: dict) -> list:
                  "参考 SKILL.md 的格式")
         else:
             pl = gdo.get("punchline")
-            if pl is not None and not _is_str(pl, 10):
-                _add(issues, "warning", "great_divide_override.punchline",
-                     "punchline 应是 10+ 字冲突金句",
-                     "写一句能传播的话，含具体数字")
+            if pl is not None:
+                if not _is_str(pl, 10):
+                    _add(issues, "warning", "great_divide_override.punchline",
+                         "punchline 应是 10+ 字冲突金句",
+                         "写一句能传播的话，含具体数字")
+                elif "【待填充】" in pl or "【TODO】" in pl:
+                    _add(issues, "warning", "great_divide_override.punchline",
+                         "punchline 包含占位符，未实际填写",
+                         "替换为基本面派 vs 技术派的核心冲突金句")
             for side in ("bull_say_rounds", "bear_say_rounds"):
                 rounds = gdo.get(side)
                 if rounds is not None:
@@ -137,10 +153,15 @@ def validate(agent_analysis: dict) -> list:
                  "参考 SKILL.md 的格式")
         else:
             cc = no.get("core_conclusion")
-            if cc is not None and not _is_str(cc, 20):
-                _add(issues, "warning", "narrative_override.core_conclusion",
-                     "core_conclusion 应是 20+ 字定论",
-                     "1-2 句结论 + 评分 + 关键证据")
+            if cc is not None:
+                if not _is_str(cc, 20):
+                    _add(issues, "warning", "narrative_override.core_conclusion",
+                         "core_conclusion 应是 20+ 字定论",
+                         "1-2 句结论 + 评分 + 关键证据")
+                elif "【待填充】" in cc or "【TODO】" in cc:
+                    _add(issues, "warning", "narrative_override.core_conclusion",
+                         "core_conclusion 包含占位符，未实际填写",
+                         "替换为基于 agent 分析的综合定论")
             risks = no.get("risks")
             if risks is not None:
                 if not _is_list(risks):

@@ -585,8 +585,47 @@ def stage2(ticker: str) -> str:
     # v2.2 · Read agent_analysis.json — the agent's written-back analysis
     agent_analysis = read_task_output(ti.full, "agent_analysis")
 
-    # v2.6 · 校验 agent_analysis schema（特别针对非 Claude 模型的输出）
-    if agent_analysis:
+    # ── v3.4 · Gate 1 硬门禁：检测 agent 是否绕过了 write_task_output ──
+    if agent_analysis and agent_analysis.get("agent_reviewed") and \
+       agent_analysis.get("_validated_by") != "write_task_output":
+        print("\n⛔ Gate 1 阻断 — agent_analysis.json 不是通过 write_task_output() 写入的")
+        print("   这意味着写入时未经过 schema 校验，可能存在结构性错误。")
+        print("   现在强制补跑校验...")
+        try:
+            from lib.agent_analysis_validator import validate as _validate_aa, format_issues as _fmt_aa
+            issues = _validate_aa(agent_analysis)
+            errs = [i for i in issues if i.severity == "error"]
+            if issues:
+                print("\n" + _fmt_aa(issues))
+                # Write error file
+                from pathlib import Path as _Path
+                err_path = _Path(".cache") / ti.full / "_agent_analysis_errors.json"
+                err_path.parent.mkdir(parents=True, exist_ok=True)
+                err_path.write_text(
+                    __import__("json").dumps(
+                        [{"severity": i.severity, "field": i.field, "message": i.message, "suggestion": i.suggestion} for i in issues],
+                        ensure_ascii=False, indent=2
+                    ),
+                    encoding="utf-8"
+                )
+                if errs:
+                    print(f"\n   🔴 Gate 1 校验失败 — {len(errs)} 条结构性错误")
+                    print(f"   → 错误清单: {err_path}")
+                    print(f"   → 修复步骤: 读错误清单 → 修正 agent_analysis.json → 用 write_task_output() 重写 → 重跑 stage2")
+                    print(f"   → 正确写法: from lib.cache import agent_analysis_template, write_task_output")
+                    print(f"   →           aa = agent_analysis_template('{ticker}')")
+                    print(f"   →           填入值后 write_task_output('{ticker}', 'agent_analysis', aa)")
+                    raise RuntimeError(
+                        f"agent_analysis.json 绕过 Gate 1（write_task_output）且存在 {len(errs)} 条结构性错误。"
+                        f"详见 {err_path}。修复后用 write_task_output() 重写。"
+                    )
+            # No errors? Just warn and stamp it
+            print("   ⚠️ 校验通过（无结构性错误），但建议后续使用 write_task_output() 写入以确保质量")
+        except ImportError:
+            print("   ⚠️ 无法加载 validator，跳过 Gate 1 校验")
+
+    # v2.6 · 校验 agent_analysis schema（Gate 2 · write_task_output 已写入的合法文件）
+    if agent_analysis and agent_analysis.get("_validated_by") == "write_task_output":
         try:
             from lib.agent_analysis_validator import validate as _validate_aa, format_issues as _fmt_aa
             issues = _validate_aa(agent_analysis)
@@ -677,8 +716,20 @@ def stage2(ticker: str) -> str:
                 __import__("json").dumps(pending, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
-            print(f"   📋 待改进项 {len(pending)} 类 → {_pending_path}")
-            print(f"      Agent 将在 stage2 完成后自动修复并重跑")
+            print(f"\n{'─' * 50}")
+            print(f"⛔ 强制步骤 — 你必须现在处理 _pending_improvements.json")
+            print(f"{'─' * 50}")
+            print(f"   📋 待修复项 {len(pending)} 类 → {_pending_path}")
+            for pk, pv in pending.items():
+                print(f"   · {pk}: {pv.get('estimated_fix', '')}")
+            print(f"")
+            print(f"   ⚡ 执行步骤（不可跳过）：")
+            print(f"   1. 读 {_pending_path}")
+            print(f"   2. 按上方提示自主修复（spawn sub-agent / 补写评语），不询问用户")
+            print(f"   3. 用 write_task_output() 重写 agent_analysis.json")
+            print(f"   4. 重跑 stage2('{ticker}')")
+            print(f"   5. 再次检查 pending — 最多 2 轮自愈循环")
+            print(f"{'─' * 50}")
     else:
         print(f"\n⚠️  未检测到 agent_analysis.json · 将使用脚本骨架生成 synthesis")
         print(f"   提示: Claude agent 应在 stage1 之后写入 .cache/{ti.full}/agent_analysis.json")
