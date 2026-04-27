@@ -672,7 +672,7 @@ def stage2(ticker: str) -> str:
 
         # v3.3 · 写入 _pending_improvements.json
         if pending:
-            _pending_path = _Path(".cache") / ti.full / "_pending_improvements.json"
+            _pending_path = Path(".cache") / ti.full / "_pending_improvements.json"
             _pending_path.write_text(
                 __import__("json").dumps(pending, ensure_ascii=False, indent=2),
                 encoding="utf-8",
