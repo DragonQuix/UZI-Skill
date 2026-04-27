@@ -747,7 +747,7 @@ except ImportError:
 def _autofill_qualitative_via_mx(raw: dict, ticker: str) -> None:
     """v2.6.1 · 自动补齐 6 个定性维度的空字段（in-place 修改 raw['dimensions']）.
 
-    优先级：MX 妙想 API → ddgs WebSearch → 显式标记 autofill_failed。
+    优先级：MX 妙想 API → Exa → DDGS → 显式标记 autofill_failed。
     适用场景：直跑模式（无 agent 介入），fetcher 拿到空数据时不能让报告也空。
 
     v2.12.1 加入 _is_junk_autofill 质量过滤 · 垃圾数据（"类型；类型" 等）不写入字段.
@@ -757,14 +757,15 @@ def _autofill_qualitative_via_mx(raw: dict, ticker: str) -> None:
     except ImportError:
         MXClient = None
     try:
-        from lib.web_search import search as _ws_search
+        from lib.web_search import search as _ws_search, _EXA_OK as _exa_ok
     except ImportError:
         _ws_search = None
+        _exa_ok = False
 
     client = MXClient() if MXClient else None
     mx_ok = client is not None and client.available
     if not mx_ok and not _ws_search:
-        print("   ⚠️ MX_APIKEY 未设置且 ddgs 不可用，跳过自动兜底")
+        print("   ⚠️ MX_APIKEY 未设置且搜索后端不可用，跳过自动兜底")
         return
 
     dims = raw.get("dimensions", {})
@@ -829,7 +830,7 @@ def _autofill_qualitative_via_mx(raw: dict, ticker: str) -> None:
             except Exception:
                 pass
 
-        # 回退 ddgs WebSearch
+        # 回退 Exa → DDGS WebSearch
         if not text and _ws_search:
             try:
                 results = _ws_search(query, max_results=3) or []
@@ -845,7 +846,7 @@ def _autofill_qualitative_via_mx(raw: dict, ticker: str) -> None:
                 if _is_junk_autofill(text):
                     text = ""
                 if text:
-                    source_used = "ddgs"
+                    source_used = "exa" if _exa_ok else "ddgs"
             except Exception:
                 pass
 

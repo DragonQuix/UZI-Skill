@@ -56,6 +56,8 @@ FETCHER_MAP = [
     ("fetch_trap_signals",    "18_trap",        lambda t, r: (t,)),
     ("fetch_contests",        "19_contests",    lambda t, r: (t,)),
     ("fetch_macro",           "3_macro",        lambda t, r: (r.get("0_basic", {}).get("data", {}).get("industry", "") or "综合",)),
+    # v3.0 · 量化基金信号 — 理杏仁 (1 API) + 名称匹配 (0 API) 替代旧 741 次 akshare 串行
+    ("fetch_quant_signal",    "_quant_signal",  lambda t, r: (t,)),
 ]
 
 
@@ -410,12 +412,15 @@ def _detect_lite_mode() -> tuple[bool, str]:
     if val in ("0", "false", "no", "off"):
         return False, "UZI_LITE=0 显式关闭"
     # auto 模式：检测 _global api_cache 是否为空（首次安装判定）
+    _exa_ok = bool(os.environ.get("EXA_API_KEY", "").strip())
     global_cache = Path(".cache/_global/api_cache")
     if not global_cache.exists():
-        return True, "首次安装（.cache/_global 不存在）自动 lite"
+        extra = " · Exa 可用（search budget=15）" if _exa_ok else ""
+        return True, f"首次安装（.cache/_global 不存在）自动 lite{extra}"
     try:
         if len(list(global_cache.iterdir())) < 5:
-            return True, "cache 非常冷（_global/api_cache 条目 < 5）自动 lite"
+            extra = " · Exa 可用（search budget=15）" if _exa_ok else ""
+            return True, f"cache 非常冷（_global/api_cache 条目 < 5）自动 lite{extra}"
     except Exception:
         pass
     return False, "cache 已预热，full mode"

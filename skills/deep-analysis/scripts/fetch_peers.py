@@ -1,4 +1,4 @@
-"""Dimension 4 · 同行对比 — 产出 peer_table + peer_comparison."""
+"""Dimension 4 · 同行对比 — v3.0 · 理杏仁批量查指标 + akshare 发现同行."""
 from __future__ import annotations
 
 import json
@@ -22,17 +22,91 @@ def _float(v, default=0.0):
 
 
 def _build_self_only_table(ti, basic: dict) -> tuple[list, list]:
-    """v2.12.1 · Tier 4 兜底：只返回公司自己一行，agent 可识别需外部补同行数据."""
     self_row = {
         "name": basic.get("name") or ti.full,
         "code": ti.full,
-        "pe": f"{_float(basic.get('pe_ttm')):.1f}" if _float(basic.get("pe_ttm")) > 0 else "—",
-        "pb": f"{_float(basic.get('pb')):.2f}" if _float(basic.get("pb")) > 0 else "—",
-        "roe": "—",
-        "revenue_growth": "—",
+        "pe": "{:.1f}".format(_float(basic.get("pe_ttm"))) if _float(basic.get("pe_ttm")) > 0 else "-",
+        "pb": "{:.2f}".format(_float(basic.get("pb"))) if _float(basic.get("pb")) > 0 else "-",
+        "roe": "-",
+        "revenue_growth": "-",
         "is_self": True,
     }
     return [self_row], []
+
+
+def _lixinger_available() -> bool:
+    return bool(os.environ.get("LIXINGER_TOKEN", "").strip())
+
+
+def _enrich_peers_with_lixinger(peer_codes: list[str], market: str) -> dict | None:
+    """逐只查询同行最新年报指标 (startDate/endDate 模式, 各有 24h 缓存).
+
+    理杏仁 date:latest 多股票模式不可靠, 改用 startDate 单股票模式逐个查.
+    每个查询 24h 缓存, 首次 ~2s/只, 之后 0s.
+    """
+    try:
+        from lib.lixinger_client import (
+            fetch_financials as lx_fs,
+            to_float as lx_tof,
+        )
+    except ImportError:
+        return None
+
+    # Only need latest year; short date range
+    import datetime
+    this_year = datetime.date.today().year
+    start_y = this_year - 3  # 确保覆盖最近已出的年报
+
+    out: dict = {}
+    for code in set(peer_codes):
+        raw = lx_fs(code, market=market, start_year=start_y, end_year=this_year)
+        if not raw or not raw.get("metrics"):
+            continue
+        m = raw["metrics"]
+
+        def _val(*keys):
+            for k in keys:
+                vals = m.get(k, [])
+                if vals:
+                    for v in reversed(vals):  # newest first
+                        fv = lx_tof(v, None)
+                        if fv is not None:
+                            return fv
+            return None
+
+        entry: dict = {}
+        pe = _val("y.bs.pe_ttm.t")
+        pb = _val("y.bs.pb.t")
+        ps = _val("y.bs.ps_ttm.t")
+        roe = _val("y.ps.wroe.t")
+        mcap = _val("y.bs.mc.t")
+        gp_m = _val("y.ps.gp_m.t")
+        debt_r = _val("y.bs.tl_ta_r.t")
+        dyr = _val("y.bs.dyr.t")
+        rev = _val("y.ps.oi.t")
+        np_ = _val("y.ps.npatoshopc.t")
+
+        if pe is not None:
+            entry["pe"] = round(pe, 1)
+        if pb is not None:
+            entry["pb"] = round(pb, 2)
+        if ps is not None:
+            entry["ps"] = round(ps, 2)
+        if roe is not None:
+            entry["roe"] = round(roe * 100, 1) if abs(roe) < 1 else round(roe, 1)
+        if mcap is not None:
+            entry["mcap_yi"] = round(mcap / 1e8, 1)
+        if gp_m is not None:
+            entry["gross_margin"] = round(gp_m * 100, 1) if abs(gp_m) < 1 else round(gp_m, 1)
+        if debt_r is not None:
+            entry["debt_ratio"] = round(debt_r * 100, 1) if abs(debt_r) < 1 else round(debt_r, 1)
+        if dyr is not None:
+            entry["dyr"] = round(dyr * 100, 2)
+
+        if entry:
+            out[code] = entry
+
+    return out if out else None
 
 
 def main(ticker: str) -> dict:
@@ -89,100 +163,135 @@ def main(ticker: str) -> dict:
             "fallback": False,
         }
 
-    # v2.12.1 · A 股分支 · 三层 fallback 链防止 push2 挂了报告空板块
+    # v3.0 · A 股 · 理杏仁批量指标优先，akshare 兜底
     fallback_used = False
     fallback_reason = ""
     source_used = "akshare:stock_board_industry_cons_em"
 
-    def _parse_peer_df(df, self_ticker_code: str):
-        """共用解析逻辑：df → (peers_raw, peer_table, peer_comparison)."""
-        df = df.copy()
-        df["_mcap"] = df["总市值"].apply(_float) if "总市值" in df.columns else 0
-        df = df.sort_values("_mcap", ascending=False)
-        raw = df.head(20).to_dict("records")
+    # Hard-coded peer lists for major industries (akshare push2 fallback)
+    _FALLBACK_PEERS: dict[str, list[str]] = {
+        "白酒": ["600519","000858","000568","002304","600809","000596","603369","603198"],
+        "啤酒": ["600600","000729","002461","600132"],
+        "乳品": ["600887","002570","300106","600429"],
+        "调味品": ["603288","600872","002650","600305"],
+        "银行": ["600036","601398","601288","601939","600016"],
+        "保险": ["601318","601628","601336","601601"],
+        "证券": ["600030","601211","601688","600837"],
+    }
 
-        self_row = None
-        peers_top5 = []
-        for r in raw:
-            code = str(r.get("代码", ""))
-            name = r.get("名称", "")
-            entry = {
-                "name": name, "code": code,
-                "pe": f"{_float(r.get('市盈率-动态')):.1f}" if _float(r.get("市盈率-动态")) > 0 else "—",
-                "pb": f"{_float(r.get('市净率')):.2f}" if _float(r.get("市净率")) > 0 else "—",
-                "roe": "—", "revenue_growth": "—",
-            }
-            if code == self_ticker_code:
-                entry["is_self"] = True
-                self_row = entry
-            elif len(peers_top5) < 5:
-                peers_top5.append(entry)
-
-        tbl = ([self_row] if self_row else []) + peers_top5
-
-        def _avg(col):
-            if col not in df.columns: return 0.0
-            vals = [_float(v) for v in df[col] if _float(v) > 0]
-            return round(sum(vals) / len(vals), 2) if vals else 0.0
-
-        cmp = [
-            {"name": "PE (越低越好)", "self": _float(basic.get("pe_ttm")), "peer": _avg("市盈率-动态")},
-            {"name": "PB (越低越好)", "self": _float(basic.get("pb")),     "peer": _avg("市净率")},
-        ]
-        return raw, tbl, cmp
-
-    if ti.market == "A" and industry:
-        # ─── Tier 1: 主链（push2） ───
+    lx_peers: dict = {}
+    if industry and _lixinger_available():
+        peer_codes: list[str] = []
         try:
             df = ak.stock_board_industry_cons_em(symbol=industry)
             if df is not None and not df.empty:
-                peers_raw, peer_table, peer_comparison = _parse_peer_df(df, ti.code)
-        except Exception as e:
-            peers_raw = [{"tier": 1, "error": f"{type(e).__name__}: {str(e)[:200]}"}]
+                peer_codes = [str(c).zfill(6) for c in df["代码"].tolist()]
+        except Exception:
+            pass
 
-        # ─── Tier 2: 重试一次（网络抖动） ───
-        if not peer_table:
-            try:
-                time.sleep(2.5)
-                df = ak.stock_board_industry_cons_em(symbol=industry)
-                if df is not None and not df.empty:
-                    peers_raw, peer_table, peer_comparison = _parse_peer_df(df, ti.code)
-                    fallback_used = True
-                    fallback_reason = "Tier 1 网络失败 · Tier 2 retry 成功"
-                    source_used += " (retry)"
-            except Exception as e:
-                peers_raw.append({"tier": 2, "error": f"{type(e).__name__}: {str(e)[:200]}"})
+        if not peer_codes and industry in _FALLBACK_PEERS:
+            peer_codes = _FALLBACK_PEERS[industry]
+            source_used += " + hardcoded_peers"
 
-        # ─── Tier 3: 雪球 Playwright 登录兜底（用户 opt-in） ───
-        if not peer_table:
-            try:
-                from lib.xueqiu_browser import is_login_enabled, fetch_peers_via_browser
-                if is_login_enabled():
-                    xq_peers = fetch_peers_via_browser(ti.code)  # 返 list[dict]
-                    if xq_peers:
-                        # 构造兼容的 df-like 结构
-                        import pandas as pd
-                        xq_df = pd.DataFrame([
-                            {"代码": p.get("code", ""), "名称": p.get("name", ""),
-                             "总市值": p.get("mcap_yi", 0),
-                             "市盈率-动态": p.get("pe", 0), "市净率": p.get("pb", 0)}
-                            for p in xq_peers
-                        ])
-                        if not xq_df.empty:
-                            peers_raw, peer_table, peer_comparison = _parse_peer_df(xq_df, ti.code)
-                            fallback_used = True
-                            fallback_reason = "Tier 1/2 akshare 失败 · Tier 3 雪球浏览器兜底"
-                            source_used = "xueqiu.com/S/{code} (playwright)"
-            except Exception as e:
-                peers_raw.append({"tier": 3, "error": f"{type(e).__name__}: {str(e)[:200]}"})
+        if peer_codes:
+            lx_peers = _enrich_peers_with_lixinger(peer_codes, "cn") or {}
+            if lx_peers:
+                source_used += " + lixinger:peers"
 
-        # ─── Tier 4 保底：仅公司自己一行 + fallback 标记 ───
-        if not peer_table:
-            peer_table, peer_comparison = _build_self_only_table(ti, basic)
-            fallback_used = True
-            if not fallback_reason:
-                fallback_reason = "所有同行数据源失败 · 仅返回公司自身"
-            source_used += " (self-only fallback)"
+    if industry or lx_peers:
+        # Try akshare for name list; fall back to lx_peers keys
+        name_map: dict[str, str] = {}
+        akshare_raw: list[dict] = []
+
+        try:
+            df = ak.stock_board_industry_cons_em(symbol=industry)
+            if df is not None and not df.empty:
+                for _, r2 in df.iterrows():
+                    c = str(r2.get("代码", "")).zfill(6)
+                    n = str(r2.get("名称", ""))
+                    name_map[c] = n
+                df2 = df.copy()
+                df2["_mcap"] = df2["总市值"].apply(_float) if "总市值" in df2.columns else 0
+                df2 = df2.sort_values("_mcap", ascending=False)
+                akshare_raw = df2.head(20).to_dict("records")
+                peers_raw = akshare_raw
+        except Exception:
+            pass
+
+        # Merge 理杏仁 data
+        self_row = None
+        peer_rows = []
+
+        # Collect all codes (from lx_peers + akshare)
+        all_codes: list[tuple[str, str, dict]] = []
+        seen = set()
+        for code, lx in lx_peers.items():
+            name = name_map.get(code, lx.get("name", code))
+            mcap = lx.get("mcap_yi", 0)
+            all_codes.append((code, name, lx))
+            seen.add(code)
+        for r2 in akshare_raw:
+            code = str(r2.get("代码", "")).zfill(6)
+            if code not in seen:
+                name = str(r2.get("名称", ""))
+                all_codes.append((code, name, {}))
+                seen.add(code)
+
+        # Sort by mcap and take top 20
+        all_codes.sort(key=lambda x: x[2].get("mcap_yi", 0), reverse=True)
+        all_codes = all_codes[:20]
+
+        for code, name, lx in all_codes:
+            pe_val = lx.get("pe") or _float({})
+            pb_val = lx.get("pb") or 0.0
+            roe_val = lx.get("roe")
+            ps_val = lx.get("ps")
+            dyr_val = lx.get("dyr")
+            mcap_val = lx.get("mcap_yi", 0)
+
+            entry = {
+                "name": name, "code": code,
+                "pe": "{:.1f}".format(pe_val) if pe_val > 0 else "-",
+                "pb": "{:.2f}".format(pb_val) if pb_val > 0 else "-",
+                "roe": "{:.1f}%".format(roe_val) if roe_val else "-",
+                "revenue_growth": "-",
+            }
+            if dyr_val is not None:
+                entry["dyr"] = "{:.2f}%".format(dyr_val)
+            if ps_val is not None:
+                entry["ps"] = "{:.1f}".format(ps_val)
+            entry["_mcap"] = mcap_val
+
+            if code == ti.code:
+                entry["is_self"] = True
+                self_row = entry
+            elif len(peer_rows) < 5:
+                peer_rows.append(entry)
+
+        peer_table = ([self_row] if self_row else []) + peer_rows
+
+        # Peer averages
+        lx_all_pe = [lx.get("pe") for lx in lx_peers.values() if lx.get("pe") and lx.get("pe") > 0]
+        lx_all_pb = [lx.get("pb") for lx in lx_peers.values() if lx.get("pb") and lx.get("pb") > 0]
+        lx_all_roe = [lx.get("roe") for lx in lx_peers.values() if lx.get("roe") is not None]
+        peer_cmp = [
+            {"name": "PE-TTM (越低越好)", "self": _float(basic.get("pe_ttm")),
+             "peer": round(sum(lx_all_pe) / len(lx_all_pe), 1) if lx_all_pe else "-"},
+            {"name": "PB (越低越好)", "self": _float(basic.get("pb")),
+             "peer": round(sum(lx_all_pb) / len(lx_all_pb), 2) if lx_all_pb else "-"},
+        ]
+        if lx_all_roe:
+            self_roe = lx_peers.get(ti.code, {}).get("roe")
+            peer_cmp.append({"name": "ROE (越高越好)", "self": self_roe,
+                             "peer": round(sum(lx_all_roe) / len(lx_all_roe), 1)})
+        peer_comparison = peer_cmp
+
+    if not peer_table:
+        peer_table, peer_comparison = _build_self_only_table(ti, basic)
+        fallback_used = True
+        if not fallback_reason:
+            fallback_reason = "同行数据源失败 · 仅公司自身"
+        source_used += " (self-only)"
 
     return {
         "ticker": ti.full,

@@ -463,6 +463,30 @@ cp .env.example .env
 
 无 key 时全部回退到 XueQiu/akshare 链，现有用户零感知。
 
+### 🔑 理杏仁 Token + Exa API Key
+
+> 以下两个 key 均为**可选**——不配置时自动降级，不会报错。
+
+#### 理杏仁 Token（`LIXINGER_TOKEN`）
+
+用于**单股精确查询**，替代原 akshare 全 A 股批量拉取。配置方式：
+```bash
+export LIXINGER_TOKEN="你的理杏仁Token"
+# Windows: [Environment]::SetEnvironmentVariable('LIXINGER_TOKEN', '你的Token', 'User')
+```
+
+#### Exa API Key（`EXA_API_KEY`）
+
+用于 **Exa 语义搜索**替代 DDGS，更快更准。配置方式：
+```bash
+export EXA_API_KEY="你的Exa API Key"
+```
+
+| 环境变量 | 必需? | 不配置时表现 |
+|---------|------|------------|
+| `LIXINGER_TOKEN` | 否 | 回退到 akshare 全市场批量拉取 |
+| `EXA_API_KEY` | 否 | 回退到 DDGS 搜索 |
+
 ### 🔓 需登录的数据源（v2.7.1 新增）
 
 部分数据源 2026 年起加了登录鉴权，UZI-Skill 默认**不主动弹登录窗**（保持无人值守）。

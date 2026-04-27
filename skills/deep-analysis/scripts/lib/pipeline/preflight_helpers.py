@@ -66,12 +66,11 @@ def prepare_target(ticker: str, *, detect_lite_fn=None) -> dict[str, Any]:
         is_lite, lite_reason = detect_lite_fn()
         if is_lite:
             os.environ["UZI_LITE"] = "1"  # 下游 fetcher 能读
-            os.environ.setdefault("UZI_DDG_BUDGET", "15")  # 全局 ddgs 预算上限
+            os.environ.setdefault("UZI_SEARCH_BUDGET", "15")  # 全局搜索预算上限（Exa + ddgs）
             print(f"\n⚡ LITE MODE: {lite_reason}")
-            print(f"   · 跳过 fetch_macro/policy/moat 的 ddgs 查询（返回空让 agent 自己补）")
-            print(f"   · fetch_industry 跳过动态景气度查询（省 3-9 次 ddgs）")
+            print(f"   · 跳过 13 个 enrichment 维度（返回空让 agent 自己补）")
             print(f"   · wave3 fund_holders 默认 top 20（UZI_FUND_LIMIT=all 可覆盖）")
-            print(f"   · 全局 ddgs 预算 15 次/ticker（超出自动 skip）")
+            print(f"   · 全局搜索预算 15 次/ticker · Exa 优先（超出自动 skip）")
             print(f"   · 完整跑请 UZI_LITE=0 && python run.py <ticker>\n")
 
     # v2.3 · 中文名解析 — 支持纠错提示。若输入无法明确解析，早退并返回候选

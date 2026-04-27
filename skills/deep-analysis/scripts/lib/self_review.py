@@ -345,22 +345,23 @@ def check_valuation_sanity(ctx: dict) -> list[Issue]:
     vm = _get_dim(ctx, "20_valuation_models")
     if not vm: return issues
     dcf = vm.get("dcf") or {}
-    iv = dcf.get("intrinsic_value_per_share", 0)
+    iv = dcf.get("intrinsic_per_share", 0)
     if iv in (None, 0, "—"):
         issues.append(Issue(
             severity="warning", category="valuation", dim="20_valuation_models",
             issue="DCF 内在价值为 0/None（可能负 FCF 或假设异常）",
-            evidence=f"intrinsic_value_per_share={iv}",
+            evidence=f"intrinsic_per_share={iv}",
             suggested_fix="检查 fetch_financials.net_profit_history 最新值是否 > 0",
         ))
 
     comps = vm.get("comps") or {}
-    target_price = comps.get("target_price_implied")
+    implied_price = comps.get("implied_price") or {}
+    target_price = implied_price.get("via_median_pe") if implied_price else None
     if target_price in (None, 0, "—"):
         issues.append(Issue(
             severity="info", category="valuation", dim="20_valuation_models",
             issue="Comps 隐含目标价缺失",
-            evidence=f"target_price_implied={target_price}",
+            evidence=f"implied_price={implied_price}",
             suggested_fix="检查 fetch_peers 是否返回足够同行样本",
         ))
     return issues

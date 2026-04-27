@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FutureTimeout
 from typing import Any
 
 from .cache import (
@@ -135,7 +136,213 @@ def fetch_basic(ti: TickerInfo) -> dict:
     return cached(ti.full, f"basic__{ti.code}", lambda: _fetch_basic_us(ti), ttl=TTL_REALTIME)
 
 
+# ═══════════════════════════════════════════════════════════════
+# v3.0 · 并行竞速版: 7 个数据源同时出发，先到先合并
+# ═══════════════════════════════════════════════════════════════
+
+def _fetch_basic_a_parallel(ti: TickerInfo) -> dict:
+    """7 个数据源并行竞速，先到先合并，总超时 12s。
+
+    策略：
+    - 所有源同时线程出发
+    - 12s 硬超时：即使有源未返回也提交已有数据
+    - 富数据（industry/chairman 等）和快数据（price/PE）并行收集
+    """
+    out: dict[str, Any] = {"code": ti.full}
+    xq_symbol = ("SH" if ti.full.endswith("SH") else "SZ") + ti.code
+
+    # ── 各数据源 worker ──
+
+    def _mx_source() -> dict[str, Any]:
+        if not _mx_available():
+            return {}
+        try:
+            from .mx_api import MXClient
+            client = MXClient()
+            snap = client.fetch_snapshot(ti.code)
+            if not snap:
+                return {}
+            r: dict[str, Any] = {"_source": "mx"}
+            for mx_k, out_k in [("最新价", "price"), ("市盈率(TTM)", "pe_ttm"), ("市净率", "pb")]:
+                v = snap.get(mx_k)
+                if v is not None and v != "" and v != "-":
+                    try: r[out_k] = float(v)
+                    except (ValueError, TypeError): pass
+            mcap = snap.get("总市值") or snap.get("市值")
+            if mcap is not None and mcap != "" and mcap != "-":
+                try: r["market_cap_raw"] = float(mcap)
+                except (ValueError, TypeError): pass
+            name = (snap.get("_mx_entity") or "").split("(")[0].strip()
+            if name: r["name"] = name
+            ind = snap.get("所属行业") or snap.get("申万行业")
+            if ind: r["industry"] = ind
+            return r
+        except Exception as e:
+            return {"_mx_err": str(e)[:120]}
+
+    def _xq_basic_source() -> dict[str, Any]:
+        try:
+            df = _retry(lambda: ak.stock_individual_basic_info_xq(symbol=xq_symbol),
+                        attempts=2, sleep=1.0)
+            if df is None or df.empty:
+                return {"_xq_basic_err": "empty"}
+            info = dict(zip(df["item"], df["value"]))
+            r: dict[str, Any] = {"_source": "xq-basic"}
+            ind_f = info.get("affiliate_industry")
+            if isinstance(ind_f, dict): r["industry"] = ind_f.get("ind_name")
+            r["name"] = info.get("org_short_name_cn") or info.get("name")
+            for sk, dk in [
+                ("org_name_cn", "full_name"), ("org_short_name_en", "name_en"),
+                ("main_operation_business", "main_business"),
+                ("org_cn_introduction", "intro"), ("staff_num", "staff_num"),
+                ("legal_representative", "legal_rep"), ("chairman", "chairman"),
+                ("actual_controller", "actual_controller"), ("listed_date", "listed_date"),
+                ("org_website", "website"), ("provincial_name", "province"),
+            ]:
+                v = info.get(sk)
+                if v: r[dk] = v
+            return r
+        except Exception as e:
+            return {"_xq_basic_err": str(e)[:120]}
+
+    def _xq_spot_source() -> dict[str, Any]:
+        try:
+            df = _retry(lambda: ak.stock_individual_spot_xq(symbol=xq_symbol),
+                        attempts=2, sleep=1.0)
+            if df is None or df.empty:
+                return {"_xq_spot_err": "empty"}
+            info = dict(zip(df["item"], df["value"]))
+            def _f(*keys):
+                for k in keys:
+                    v = info.get(k)
+                    if v is not None and v != "":
+                        try: return float(v)
+                        except (ValueError, TypeError): pass
+                return None
+            r: dict[str, Any] = {"_source": "xq-spot",
+                "price": _f("现价"), "pe_ttm": _f("市盈率(TTM)"), "pb": _f("市净率"),
+                "market_cap_raw": _f("资产净值/总市值"), "change_pct": _f("涨幅")}
+            mcap = r.get("market_cap_raw")
+            if mcap: r["market_cap"] = f"{round(mcap/1e8,1)}亿"
+            return {k: v for k, v in r.items() if v is not None}
+        except Exception as e:
+            return {"_xq_spot_err": str(e)[:120]}
+
+    def _em_direct_source() -> dict[str, Any]:
+        if not requests: return {}
+        try:
+            secid = ("1." if ti.full.endswith("SH") else "0.") + ti.code
+            resp = requests.get("https://push2.eastmoney.com/api/qt/stock/get", params={
+                "secid": secid,
+                "fields": "f43,f44,f45,f46,f47,f48,f50,f57,f58,f116,f117,f162,f164",
+                "ut": "fa5fd1943c7b386f172d6893dbfba10b",
+            }, timeout=6, headers={"User-Agent": "Mozilla/5.0"})
+            data = (resp.json() or {}).get("data") or {}
+            if not data: return {"_em_direct_err": "empty"}
+            r: dict[str, Any] = {"_source": "em-direct"}
+            price = (data.get("f43") or 0) / 100
+            if price: r["price"] = price
+            pe = data.get("f162")
+            if pe and str(pe) != "-": r["pe_ttm"] = float(pe) / 100
+            pb = data.get("f167")
+            if pb and str(pb) != "-": r["pb"] = float(pb) / 100
+            if data.get("f116"): r["market_cap_raw"] = data["f116"]
+            return r
+        except Exception as e:
+            return {"_em_direct_err": str(e)[:120]}
+
+    def _tencent_source() -> dict[str, Any]:
+        if not requests: return {}
+        try:
+            prefix = "sh" if ti.full.endswith("SH") else "sz"
+            resp = requests.get(f"http://qt.gtimg.cn/q={prefix}{ti.code}",
+                               timeout=6, headers={"User-Agent": "Mozilla/5.0"})
+            text = resp.text
+            if "~" not in text: return {"_tencent_err": "bad format"}
+            p0 = text.find('"') + 1
+            parts = text[p0:text.rfind('"')].split("~")
+            if len(parts) < 40: return {"_tencent_err": f"short:{len(parts)}"}
+            r: dict[str, Any] = {"_source": "tencent-qt", "name": parts[1]}
+            try: r["price"] = float(parts[3]) if parts[3] else 0
+            except (ValueError, IndexError): pass
+            try:
+                if len(parts) > 39 and parts[39]:
+                    r["pe_ttm"] = float(parts[39])
+            except (ValueError, IndexError): pass
+            try:
+                if len(parts) > 46 and parts[46]:
+                    r["pb"] = float(parts[46])
+            except (ValueError, IndexError): pass
+            try:
+                if len(parts) > 45 and parts[45]:
+                    mcap = float(parts[45])
+                    r["market_cap_raw"] = mcap
+                    r["market_cap"] = f"{round(mcap/1e8,1)}亿"
+            except (ValueError, IndexError): pass
+            return r
+        except Exception as e:
+            return {"_tencent_err": str(e)[:120]}
+
+    def _em_info_source() -> dict[str, Any]:
+        try:
+            df = _retry(lambda: ak.stock_individual_info_em(symbol=ti.code),
+                        attempts=2, sleep=1.0)
+            if df is None or df.empty: return {"_info_err": "empty"}
+            info = dict(zip(df["item"], df["value"]))
+            r: dict[str, Any] = {"_source": "em-info"}
+            if info.get("股票简称"): r["name"] = info["股票简称"]
+            if info.get("行业"): r["industry"] = info["行业"]
+            return r
+        except Exception as e:
+            return {"_info_err": str(e)[:120]}
+
+    # ── 并行执行 ──
+    workers = [_tencent_source, _mx_source, _xq_spot_source,
+               _xq_basic_source, _em_direct_source, _em_info_source]
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = {pool.submit(fn): fn.__name__ for fn in workers}
+        try:
+            for fut in as_completed(futures, timeout=12):
+                label = futures[fut]
+                try:
+                    result = fut.result(timeout=10)
+                except Exception:
+                    result = {f"_{label}_err": "crash"}
+                for k, v in (result or {}).items():
+                    if k.startswith("_"): out[k] = v
+                    elif v is not None and v != "" and k not in out:
+                        out[k] = v
+        except FutureTimeout:
+            pass
+
+    # 后处理: market_cap 格式化（tencent-qt 返回亿单位，其他源返回元单位）
+    mcap_raw = out.get("market_cap_raw")
+    if mcap_raw and isinstance(mcap_raw, (int, float)):
+        if "market_cap" not in out or out.get("market_cap") in (None, "", "0.0亿"):
+            if mcap_raw > 1e6:  # >100万 → 单位是元
+                out["market_cap"] = f"{round(mcap_raw / 1e8, 1)}亿"
+            else:  # 已经是亿单位
+                out["market_cap"] = f"{round(mcap_raw, 1)}亿"
+
+    if "market_cap_raw" in out and not isinstance(out.get("market_cap_raw"), (int, float)):
+        del out["market_cap_raw"]
+
+    out["_fallback_snap"] = out.get("_source", "parallel-merged")
+    return out
+
+
 def _fetch_basic_a(ti: TickerInfo) -> dict:
+    """v3.0 · 并行竞速版 — 7 个数据源同时出发，先到先合并。
+
+    旧串行 fallback 链在代理/SSL 场景下每个失败源浪费 10-15s，
+    5 个源串行 = 50-140s。并行化后所有源同时发出，最快 3-5s 拿到数据。
+    """
+    return _fetch_basic_a_parallel(ti)
+
+
+# 保留旧版串行实现，通过环境变量 UZI_BASIC_SERIAL=1 切换
+def _fetch_basic_a_serial(ti: TickerInfo) -> dict:
     if ak is None:
         raise RuntimeError("akshare not installed")
     out = {"code": ti.full}

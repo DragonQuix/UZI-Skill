@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from run_real_test import stage1; stage1\\('600938.SH'\\)\")",
+      "Bash(python -c \"from run_real_test import stage2; stage2\\('600938.SH'\\)\")",
+      "Bash(UZI_SKIP_REVIEW=1 python -c \"from run_real_test import stage2; stage2\\('600938.SH'\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(UZI_LITE=0 python -c \"from run_real_test import stage1; stage1\\('600938.SH'\\)\")",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('lib/self_review.py', doraise=True\\); print\\('OK'\\)\")",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git -C \"E:/Repos/dragonquix/UZI-Skill-local\" add README.md)",
+      "Bash(git -C E:/Repos/dragonquix/UZI-Skill-local commit -m ' *)",
+      "Bash(git -C \"E:/Repos/dragonquix/UZI-Skill-local\" log --oneline -4)",
+      "Bash(git -C \"E:/Repos/dragonquix/UZI-Skill-local\" status --short)",
+      "Bash(git *)",
+      "Bash(python run_real_test.py 601336.SH)",
+      "Bash(python -c \"from run_real_test import stage2; stage2\\('601336.SH'\\)\")",
+      "Bash(tasklist)",
+      "Bash(powershell -Command \"Get-Process python* -ErrorAction SilentlyContinue | Select-Object Id, CPU, WorkingSet64 | Format-Table\")",
+      "Bash(powershell *)",
+      "Bash(python -u -c \"from run_real_test import stage2; stage2\\('601336.SH'\\)\")",
+      "Bash(python -u -c ' *)",
+      "Bash(python -u -c \"from run_real_test import stage1; stage1\\('601336.SH'\\)\")",
+      "Bash([ -f \"E:/Repos/dragonquix/UZI-Skill-local/skills/deep-analysis/scripts/lib/$f\" ])",
+      "Bash([ -f \"E:/Repos/dragonquix/UZI-Skill-local/skills/deep-analysis/scripts/$f\" ])",
+      "Bash([ -f \"C:/Users/admin/.claude/plugins/cache/uzi-skill/stock-deep-analyzer/2.15.5/skills/deep-analysis/scripts/lib/$f\" ])",
+      "Bash([ -f \"C:/Users/admin/.claude/plugins/cache/uzi-skill/stock-deep-analyzer/2.15.5/skills/deep-analysis/scripts/$f\" ])",
+      "PowerShell(robocopy $repo $plugin /E /XC /XN /XO /XD \"__pycache__\" \".cache\" \"api_cache\" \"reports\" \".git\" /L /NJH /NJS /NP 2>&1)",
+      "PowerShell($repo = \"E:\\\\Repos\\\\dragonquix\\\\UZI-Skill-local\\\\skills\\\\deep-analysis\\\\\")",
+      "PowerShell($plugin = \"C:\\\\Users\\\\admin\\\\.claude\\\\plugins\\\\cache\\\\uzi-skill\\\\stock-deep-analyzer\\\\2.15.5\\\\skills\\\\deep-analysis\\\\\")"
+    ]
+  }
+}

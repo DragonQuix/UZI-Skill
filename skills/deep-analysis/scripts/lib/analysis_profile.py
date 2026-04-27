@@ -233,7 +233,7 @@ def apply_profile_to_env(profile: AnalysisProfile) -> None:
     """把 profile 同步到下游子系统读的环境变量."""
     os.environ["UZI_DEPTH"] = profile.depth
     os.environ["UZI_LITE"] = "1" if profile.depth == DEPTH_LITE else "0"
-    os.environ["UZI_DDG_BUDGET"] = str(profile.ddg_budget) if profile.ddg_budget > 0 else "0"
+    os.environ["UZI_SEARCH_BUDGET"] = str(profile.ddg_budget) if profile.ddg_budget > 0 else "0"
     os.environ["UZI_FUND_STATS_TOP"] = str(profile.fund_stats_top_n)
 
 
