@@ -214,6 +214,13 @@ _VALUATION_HISTORY_METRICS = [
     "q.bs.shbt10sh_tsc_r.t", "q.bs.shbpoof_csc_r.t",
 ]
 
+# 港股估值历史字段 — HK API 不支持 q.* 季度前缀，仅支持 y.* 年报粒度
+# 且可用字段远少于 A 股：无 pcf_ttm/dyr/shn/shbt10sh_tsc_r/shbpoof_csc_r
+_VALUATION_HISTORY_METRICS_HK = [
+    "y.bs.pe_ttm.t", "y.bs.pb.t", "y.bs.ps_ttm.t",
+    "y.bs.mc.t", "y.bs.tsc.t",
+]
+
 
 # ── 公共 API ───────────────────────────────────────────────────────
 def fetch_financials(stock_code: str, market: str = "cn",
@@ -273,12 +280,14 @@ def fetch_valuation_history(stock_code: str, market: str = "cn",
     end_date = datetime.date.today().isoformat()
     start_date = (datetime.date.today() - datetime.timedelta(days=years_back * 365)).isoformat()
 
+    metrics = _VALUATION_HISTORY_METRICS_HK if market == "hk" else _VALUATION_HISTORY_METRICS
+
     body = {
         "token": token,
         "stockCodes": [stock_code],
         "startDate": start_date,
         "endDate": end_date,
-        "metricsList": _VALUATION_HISTORY_METRICS,
+        "metricsList": metrics,
     }
 
     cache_key = "valhist__{}__{}__{}y".format(market, stock_code, years_back)

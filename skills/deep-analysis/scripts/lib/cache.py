@@ -91,7 +91,28 @@ def market_status() -> dict:
 
 
 def write_task_output(ticker: str, task_name: str, data: dict) -> Path:
-    """Write a task's final JSON to .cache/{ticker}/{task_name}.json"""
+    """Write a task's final JSON to .cache/{ticker}/{task_name}.json
+
+    v3.3+: When task_name is 'agent_analysis', validates schema before writing.
+    Structural errors (buy_zones missing keys, wrong types) raise RuntimeError
+    so the Agent can fix them immediately before stage2.
+    """
+    # ── v3.3 · agent_analysis 写入前校验 ──
+    if task_name == "agent_analysis":
+        try:
+            from lib.agent_analysis_validator import validate as _validate
+            issues = _validate(data)
+            errs = [i for i in issues if i.severity == "error"]
+            if errs:
+                msg = ["agent_analysis.json 写入被阻断 — 以下字段必须修复:"]
+                for e in errs:
+                    msg.append(f"  🔴 {e.field}: {e.message}")
+                    msg.append(f"     → {e.suggestion}")
+                msg.append(f"\n  共 {len(errs)} 条结构性错误，修复后重试 write_task_output")
+                raise RuntimeError("\n".join(msg))
+        except ImportError:
+            pass  # validator not available, write anyway
+
     path = CACHE_ROOT / ticker / f"{task_name}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding="utf-8")

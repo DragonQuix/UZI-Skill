@@ -606,7 +606,12 @@ def stage2(ticker: str) -> str:
                 )
                 if errs:
                     print(f"   → 详细 issue 写入 {err_path}")
-                    print(f"   → {len(errs)} 条结构性错误，agent 应修正后重跑 stage2")
+                    print(f"   🔴 stage2 中止 — {len(errs)} 条结构性错误，请修正 agent_analysis.json 后重跑")
+                    print(f"   修复步骤: 读 {err_path} → 逐条修复 → 重新 write_task_output → 重新 stage2")
+                    raise RuntimeError(
+                        f"agent_analysis.json 存在 {len(errs)} 条结构性错误，"
+                        f"详见 {err_path}。修复后重新 stage2。"
+                    )
         except Exception as _ve:
             print(f"   ⚠️ schema 校验跳过: {_ve}")
 
@@ -619,13 +624,23 @@ def stage2(ticker: str) -> str:
         print(f"   narrative_override: {'✓' if agent_analysis.get('narrative_override') else '✗'}")
         print(f"   great_divide_override: {'✓' if agent_analysis.get('great_divide_override') else '✗'}")
 
-        # v2.4 · HARD-GATE-QUALITATIVE 校验（仅警示，不 abort）
+        # v2.4 · HARD-GATE-QUALITATIVE 校验 + v3.3 · 自动补漏清单
         qd = agent_analysis.get("qualitative_deep_dive") or {}
         required_dims = ("3_macro", "7_industry", "8_materials", "9_futures", "13_policy", "15_events")
         missing_qd = [d for d in required_dims if d not in qd or not qd[d].get("evidence")]
         total_evidence = sum(len((qd.get(d) or {}).get("evidence") or []) for d in required_dims)
         total_assoc = sum(len((qd.get(d) or {}).get("associations") or []) for d in required_dims)
+
+        # v3.3 · 收集所有 deferred 改进项 → _pending_improvements.json
+        pending: dict[str, dict] = {}
         if missing_qd:
+            pending["qualitative_deep_dive"] = {
+                "missing_dims": missing_qd,
+                "total_evidence": total_evidence,
+                "total_associations": total_assoc,
+                "estimated_fix": "spawn 3 parallel sub-agents (Macro-Policy / Industry-Events / Cost-Transmission), ~90s",
+                "instructions": "对每维做 web search → 填充 evidence[{source, url, finding, retrieved_at}] + associations[{causal_chain, estimated_impact}] + conclusion",
+            }
             print(f"   ⚠️  qualitative_deep_dive: 缺失 {len(missing_qd)}/6 维 ({','.join(missing_qd)})")
             print(f"      → 参考 references/task2.5-qualitative-deep-dive.md")
             print(f"      → 应 spawn 3 个并行 sub-agent (Macro-Policy / Industry-Events / Cost-Transmission)")
@@ -633,6 +648,37 @@ def stage2(ticker: str) -> str:
             print(f"   qualitative_deep_dive: ✓ 6 维全覆盖 · evidence {total_evidence} 条 · associations {total_assoc} 条")
             if total_assoc < 3:
                 print(f"   ⚠️  跨域因果链仅 {total_assoc} 条，task2.5 要求 ≥ 3 条")
+                pending["qualitative_deep_dive_associations"] = {
+                    "current": total_assoc, "required": 3,
+                    "estimated_fix": "补充跨域因果链，Agent 基于已有 analysis 上下文即可完成",
+                }
+
+        # v3.3 · dim_commentary 覆盖率检查
+        ag_dc = agent_analysis.get("dim_commentary") or {}
+        covered_dims = [k for k, v in ag_dc.items() if isinstance(v, str) and len(v.strip()) >= 20]
+        if len(covered_dims) < 15:
+            all_dims = [
+                "0_basic", "1_financials", "2_kline", "3_macro", "4_peers", "5_chain",
+                "6_research", "7_industry", "8_materials", "9_futures", "10_valuation",
+                "11_governance", "12_capital_flow", "13_policy", "14_moat", "15_events",
+                "16_lhb", "17_sentiment", "18_trap", "19_contests",
+            ]
+            missing_dc = [d for d in all_dims if d not in covered_dims]
+            pending["dim_commentary_coverage"] = {
+                "covered": len(covered_dims), "total": len(all_dims), "threshold": 15,
+                "missing_dims": missing_dc,
+                "estimated_fix": f"补写 {len(missing_dc)} 个维度的 dim_commentary，Agent 基于已采集的 raw_data 即可完成",
+            }
+
+        # v3.3 · 写入 _pending_improvements.json
+        if pending:
+            _pending_path = _Path(".cache") / ti.full / "_pending_improvements.json"
+            _pending_path.write_text(
+                __import__("json").dumps(pending, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            print(f"   📋 待改进项 {len(pending)} 类 → {_pending_path}")
+            print(f"      Agent 将在 stage2 完成后自动修复并重跑")
     else:
         print(f"\n⚠️  未检测到 agent_analysis.json · 将使用脚本骨架生成 synthesis")
         print(f"   提示: Claude agent 应在 stage1 之后写入 .cache/{ti.full}/agent_analysis.json")

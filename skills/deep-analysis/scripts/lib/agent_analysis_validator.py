@@ -161,7 +161,7 @@ def validate(agent_analysis: dict) -> list:
                     for k in REQUIRED_BUY_ZONE_KEYS:
                         zone = bz.get(k)
                         if zone is None:
-                            _add(issues, "warning", f"narrative_override.buy_zones.{k}",
+                            _add(issues, "error", f"narrative_override.buy_zones.{k}",
                                  f"缺少 {k} 派系买入区间", f'加 "{k}": {{"price": X, "rationale": "..."}}')
                         elif not _is_dict(zone):
                             _add(issues, "error", f"narrative_override.buy_zones.{k}",

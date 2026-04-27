@@ -100,13 +100,15 @@ def _fetch_valuation_via_lixinger(ti, current_pe=None, current_pb=None) -> dict 
             result.append(lx_tof(v, None))
         return [v for v in result if v is not None]
 
-    pe_hist = _series("q.bs.pe_ttm.t")
-    pb_hist = _series("q.bs.pb.t")
-    ps_hist = _series("q.bs.ps_ttm.t")
-    pcf_hist = _series("q.bs.pcf_ttm.t")
-    dyr_hist = _series("q.bs.dyr.t")
-    mcap_hist = _series("q.bs.mc.t")
-    shn_hist = _series("q.bs.shn.t")
+    # HK API 仅支持 y.* 年报粒度，A 股用 q.* 季度粒度
+    pfx = "y" if market == "hk" else "q"
+    pe_hist = _series(f"{pfx}.bs.pe_ttm.t")
+    pb_hist = _series(f"{pfx}.bs.pb.t")
+    ps_hist = _series(f"{pfx}.bs.ps_ttm.t")
+    pcf_hist = _series(f"{pfx}.bs.pcf_ttm.t")     # HK 无此字段，返回空
+    dyr_hist = _series(f"{pfx}.bs.dyr.t")          # HK 无此字段，返回空
+    mcap_hist = _series(f"{pfx}.bs.mc.t")
+    shn_hist = _series(f"{pfx}.bs.shn.t")           # HK 无此字段，返回空
 
     out: dict = {}
 

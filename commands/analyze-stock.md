@@ -91,13 +91,18 @@ write_task_output(ticker, "agent_analysis", {
     },
     "narrative_override": {
         "core_conclusion": "综合结论",
-        "risks": ["风险1", "风险2", ...],
-        "buy_zones": { ... }
+        "risks": ["风险1", "风险2", "风险3"],
+        "buy_zones": {
+            "value":      {"price": 17.50, "rationale": "DCF安全边际>50%，卡拉曼/格雷厄姆入场区"},
+            "growth":     {"price": 20.00, "rationale": "PEG<1 + 营收加速拐点，林奇/欧奈尔入场区"},
+            "technical":  {"price": 18.50, "rationale": "MA200支撑位 + 缩量止跌确认，利弗莫尔/米内尔维尼入场区"},
+            "youzi":      {"price": 0, "rationale": "非A股，游资不参与 — 设为0或skip"}
+        }
     }
 })
 ```
 
-### 第三段 · 生成报告（脚本完成）
+### 第三段 · 生成报告 + 自动补漏（v3.3 自愈循环）
 
 ```bash
 python -c "from run_real_test import stage2; stage2('$ARGUMENTS')"
@@ -105,6 +110,29 @@ python -c "from run_real_test import stage2; stage2('$ARGUMENTS')"
 
 stage2 会自动读取 panel.json + agent_analysis.json，合并生成最终报告。
 agent_analysis.json 中的字段优先级高于脚本 stub。
+
+**⚠️ 如果 stage2 因结构性错误失败（RuntimeError）**：
+读 `_agent_analysis_errors.json` → 逐条修复 → 重写 agent_analysis.json → 重跑 stage2。
+这些是可以在 1 分钟内修复的翻译错误（缺 key / 类型不对 / 字符串太短）。
+
+**📋 stage2 成功后，必须读 `.cache/{ticker}/_pending_improvements.json`**：
+
+```
+import json
+pending = json.loads(Path(f".cache/{ticker}/_pending_improvements.json").read_text(encoding="utf-8"))
+```
+
+如果 `pending` 为空 → 直接跳到第四段汇报。
+如果 `pending` 非空 → **自主修复（不询问用户）**：
+
+| pending key | 修复方式 |
+|---|---|
+| `qualitative_deep_dive` | spawn 3 parallel sub-agents (Macro-Policy / Industry-Events / Cost-Transmission)，搜 web → 填充 evidence/associations/conclusion |
+| `qualitative_deep_dive_associations` | 基于已有的 agent 分析上下文，补写跨域因果链 |
+| `dim_commentary_coverage` | 读 raw_data.json 该维度数据 → 写 1-2 句定性评语（≥20 字） |
+
+修复后：重写 agent_analysis.json → 重跑 stage2 → 再次检查 pending。
+**最多 2 轮自愈循环。** 2 轮后无论是否完全修复都向用户汇报。
 
 ### 第四段 · 向用户汇报
 
