@@ -56,6 +56,8 @@ FETCHER_MAP = [
     ("fetch_trap_signals",    "18_trap",        lambda t, r: (t,)),
     ("fetch_contests",        "19_contests",    lambda t, r: (t,)),
     ("fetch_macro",           "3_macro",        lambda t, r: (r.get("0_basic", {}).get("data", {}).get("industry", "") or "综合",)),
+    # v3.0 · 量化基金信号 — 理杏仁 (1 API) + 名称匹配 (0 API) 替代旧 741 次 akshare 串行
+    ("fetch_quant_signal",    "_quant_signal",  lambda t, r: (t,)),
 ]
 
 

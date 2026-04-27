@@ -175,9 +175,10 @@ def detect_style(features: dict, raw: dict | None = None) -> str:
         return DISTRESSED
 
     # 2. 量化因子型：多家量化基金 top-10 重仓
+    # v3.0 · detect_quant_signal_fast 使用名称匹配 (0 API) 替代旧的 741 次串行 akshare 调用
     try:
-        from .quant_signal import detect_quant_signal
-        sig = detect_quant_signal(
+        from .quant_signal import detect_quant_signal_fast
+        sig = detect_quant_signal_fast(
             features.get("code") or raw.get("ticker", ""),
             raw.get("fund_managers", []),
         )
