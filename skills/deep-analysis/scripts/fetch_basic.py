@@ -92,7 +92,6 @@ def main(user_input: str) -> dict:
                         r = rows[0]
                         for key, label in [
                             ("ipoDate", "ipo_date"),
-                            ("name", "name"),
                             ("listingStatus", "listing_status"),
                             ("exchange", "exchange"),
                             ("mutualMarketFlag", "stock_connect"),

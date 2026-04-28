@@ -44,7 +44,9 @@ def _retry_request(method: str, url: str, max_retries: int = 2, **kwargs) -> req
                 time.sleep((2 ** attempt) + random.uniform(0, 0.5))
                 continue
             raise
-    raise last_exc  # type: ignore[misc]
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("_retry_request: unexpected exit from retry loop")
 
 
 def _api_key() -> str:

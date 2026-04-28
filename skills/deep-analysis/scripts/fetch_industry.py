@@ -13,7 +13,7 @@ from lib.industry_mapping import resolve_csrc_industry
 # Industry → (growth %, TAM 亿, penetration %, lifecycle stage)
 # Hardcoded domain knowledge for common industries (fallback when no API)
 INDUSTRY_ESTIMATES: dict[str, dict] = {
-    "光学光电子": {
+    "光电子器件": {   # was: 光学光电子
         "growth": "+30%/年",
         "tam": "¥420 亿",
         "penetration": "12%",
@@ -27,21 +27,21 @@ INDUSTRY_ESTIMATES: dict[str, dict] = {
         "lifecycle": "成长期",
         "note": "国产替代 + AI 算力需求",
     },
-    "医药生物": {
+    "医疗保健设备与用品": {   # was: 医药生物
         "growth": "+10%/年",
         "tam": "¥3.2 万亿",
         "penetration": "—",
         "lifecycle": "成熟期",
         "note": "集采降价 + 创新药放量博弈",
     },
-    "电池": {
+    "电气部件与设备": {   # was: 电池
         "growth": "+22%/年",
         "tam": "¥1.8 万亿",
         "penetration": "电车 38%",
         "lifecycle": "成长期",
         "note": "动力电池 + 储能双驱动",
     },
-    "白酒": {
+    "饮料": {   # was: 白酒
         "growth": "+6%/年",
         "tam": "¥7500 亿",
         "penetration": "—",
@@ -55,7 +55,7 @@ INDUSTRY_ESTIMATES: dict[str, dict] = {
         "lifecycle": "成熟期",
         "note": "净息差收窄 + 红利防御属性",
     },
-    "钢铁": {
+    "黑色金属": {   # was: 钢铁
         "growth": "-2%/年",
         "tam": "—",
         "penetration": "—",
@@ -68,8 +68,14 @@ INDUSTRY_ESTIMATES: dict[str, dict] = {
 def _best_industry_match(industry: str) -> dict:
     if not industry:
         return {}
+    # v3.6 · 新增旧名别名兼容（非理杏仁 fallback 可能返回旧行业名）
+    _LEGACY_ALIASES = {
+        "光学光电子": "光电子器件", "电池": "电气部件与设备",
+        "白酒": "饮料", "钢铁": "黑色金属", "医药生物": "医疗保健设备与用品",
+    }
+    search_name = _LEGACY_ALIASES.get(industry, industry)
     for key, val in INDUSTRY_ESTIMATES.items():
-        if key in industry or industry in key or industry[:2] in key:
+        if key in search_name or search_name in key or search_name[:2] in key:
             return val
     return {}
 

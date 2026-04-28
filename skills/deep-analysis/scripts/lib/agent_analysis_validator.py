@@ -27,9 +27,12 @@ from dataclasses import dataclass, field
 
 VALID_SIGNALS = {"bullish", "bearish", "neutral", "skip"}
 
-# 合成/通用 URL 模式 — agent 返回域名首页而非具体文章时，判定为合成数据
+# 合成/通用 URL 模式 — agent 返回域名首页而非具体文章时，判定为合成数据。
+# 第一条 catch-all (^https?://[^/]+/?$) 已覆盖所有裸域名首页。
+# 后续特定域名作为 defense-in-depth 文档：即使 catch-all 被意外移除，
+# 这些已知合成数据源仍能被拦截。新增域名在此追加即可。
 _GENERIC_URL_PATTERNS: tuple[re.Pattern, ...] = (
-    re.compile(r'^https?://[^/]+/?$'),                          # 纯域名无路径
+    re.compile(r'^https?://[^/]+/?$'),                          # catch-all · 纯域名无路径
     re.compile(r'^https?://finance\.sina\.com\.cn/?$'),
     re.compile(r'^https?://finance\.eastmoney\.com/?$'),
     re.compile(r'^https?://(www\.)?xueqiu\.com/?$'),
@@ -270,10 +273,12 @@ def _check_evidence_quality(issues: list, dim_k: str, ev: list) -> None:
         else:
             if any(p.search(url) for p in _GENERIC_URL_PATTERNS):
                 generic_url += 1
-            if url in seen_urls:
+            # 标准化后比较（去 trailing slash / query fragment 尾部差异）
+            url_norm = url.rstrip("/").rstrip("/?")
+            if url_norm in seen_urls:
                 dup_url += 1
             else:
-                seen_urls.add(url)
+                seen_urls.add(url_norm)
 
         if not e.get("source"):
             missing_source += 1
