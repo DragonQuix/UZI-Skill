@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import os
+
+from lib.industry_peers import get_peer_codes
 import sys
 import time
 
@@ -168,16 +170,7 @@ def main(ticker: str) -> dict:
     fallback_reason = ""
     source_used = "akshare:stock_board_industry_cons_em"
 
-    # Hard-coded peer lists for major industries (akshare push2 fallback)
-    _FALLBACK_PEERS: dict[str, list[str]] = {
-        "白酒": ["600519","000858","000568","002304","600809","000596","603369","603198"],
-        "啤酒": ["600600","000729","002461","600132"],
-        "乳品": ["600887","002570","300106","600429"],
-        "调味品": ["603288","600872","002650","600305"],
-        "银行": ["600036","601398","601288","601939","600016"],
-        "保险": ["601318","601628","601336","601601"],
-        "证券": ["600030","601211","601688","600837"],
-    }
+    # Fallback via shared INDUSTRY_PEERS in lib/industry_peers.py (34 industries)
 
     lx_peers: dict = {}
     if industry and _lixinger_available():
@@ -189,9 +182,10 @@ def main(ticker: str) -> dict:
         except Exception:
             pass
 
-        if not peer_codes and industry in _FALLBACK_PEERS:
-            peer_codes = _FALLBACK_PEERS[industry]
-            source_used += " + hardcoded_peers"
+        if not peer_codes:
+            peer_codes = get_peer_codes(industry)
+            if peer_codes:
+                source_used += " + INDUSTRY_PEERS_fallback"
 
         if peer_codes:
             lx_peers = _enrich_peers_with_lixinger(peer_codes, "cn") or {}

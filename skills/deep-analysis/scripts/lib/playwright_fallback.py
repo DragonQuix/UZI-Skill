@@ -280,7 +280,7 @@ def _strategy_4_peers(ticker: str, raw: dict) -> dict | None:
         if len(peers) >= 20:
             break
 
-    return {"peer_table_playwright": peers} if peers else None
+    return {"peer_table": peers} if peers else None
 
 
 def _strategy_8_materials(ticker: str, raw: dict) -> dict | None:
@@ -682,7 +682,10 @@ def autofill_via_playwright(raw: dict, ticker: str) -> dict:
 
         # 写入
         data = dim.setdefault("data", {})
-        data.update(result)
+        # 逐 key 合并，不覆盖已有的非空值（playwright 是兜底，不应覆盖 API 富数据）
+        for k, v in result.items():
+            if k not in data or _is_empty_value(data.get(k)):
+                data[k] = v
         dim["source"] = (dim.get("source", "") + " + playwright_fallback").lstrip(" +")
         # 确保 dim 进入 dimensions（如果之前没有）
         dims.setdefault(dim_key, dim)

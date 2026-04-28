@@ -8,12 +8,43 @@ API key read from EXA_API_KEY env var (same key as Exa MCP server).
 from __future__ import annotations
 
 import os
+import random
+import time
 from typing import Optional
 
 import requests
 
 EXA_BASE = "https://api.exa.ai"
 REQUEST_TIMEOUT = 15
+
+
+def _retry_request(method: str, url: str, max_retries: int = 2, **kwargs) -> requests.Response:
+    """带指数退避的 HTTP 请求。重试条件: ConnectionError/Timeout/5xx/429。"""
+    last_exc = None
+    for attempt in range(max_retries + 1):
+        try:
+            r = requests.request(method, url, **kwargs)
+            if r.status_code in (429, 500, 502, 503, 504):
+                if attempt < max_retries:
+                    time.sleep((2 ** attempt) + random.uniform(0, 0.5))
+                    continue
+            r.raise_for_status()
+            return r
+        except (requests.ConnectionError, requests.Timeout) as e:
+            last_exc = e
+            if attempt < max_retries:
+                time.sleep((2 ** attempt) + random.uniform(0, 0.5))
+                continue
+            raise
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code < 500 and e.response.status_code != 429:
+                raise
+            last_exc = e
+            if attempt < max_retries:
+                time.sleep((2 ** attempt) + random.uniform(0, 0.5))
+                continue
+            raise
+    raise last_exc  # type: ignore[misc]
 
 
 def _api_key() -> str:
@@ -52,13 +83,8 @@ def search(
         payload["excludeDomains"] = exclude_domains
 
     try:
-        r = requests.post(
-            f"{EXA_BASE}/search",
-            json=payload,
-            headers=_headers(),
-            timeout=REQUEST_TIMEOUT,
-        )
-        r.raise_for_status()
+        r = _retry_request("POST", f"{EXA_BASE}/search",
+                           json=payload, headers=_headers(), timeout=REQUEST_TIMEOUT)
         meta = r.json()
     except Exception as e:
         return [{"error": f"exa search: {type(e).__name__}: {str(e)[:120]}"}]
@@ -72,13 +98,9 @@ def search(
     text_map: dict[str, str] = {}
     if urls:
         try:
-            r2 = requests.post(
-                f"{EXA_BASE}/contents",
-                json={"urls": urls, "maxCharacters": 2000},
-                headers=_headers(),
-                timeout=REQUEST_TIMEOUT + 5,
-            )
-            r2.raise_for_status()
+            r2 = _retry_request("POST", f"{EXA_BASE}/contents",
+                                json={"urls": urls, "maxCharacters": 2000},
+                                headers=_headers(), timeout=REQUEST_TIMEOUT + 5)
             contents_data = r2.json()
             for page in contents_data.get("results", []):
                 t = (page.get("text") or "")
@@ -106,13 +128,9 @@ def search(
 def fetch_page(url: str, max_chars: int = 3000) -> dict | None:
     """Fetch single page content as clean markdown via Exa contents API."""
     try:
-        r = requests.post(
-            f"{EXA_BASE}/contents",
-            json={"urls": [url], "maxCharacters": max_chars},
-            headers=_headers(),
-            timeout=REQUEST_TIMEOUT,
-        )
-        r.raise_for_status()
+        r = _retry_request("POST", f"{EXA_BASE}/contents",
+                           json={"urls": [url], "maxCharacters": max_chars},
+                           headers=_headers(), timeout=REQUEST_TIMEOUT)
         data = r.json()
         pages = data.get("results", [])
         if pages and pages[0].get("text"):

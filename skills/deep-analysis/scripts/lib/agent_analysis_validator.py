@@ -22,9 +22,26 @@ patterns that genuinely break stage2 / assemble_report rendering.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 VALID_SIGNALS = {"bullish", "bearish", "neutral", "skip"}
+
+# 合成/通用 URL 模式 — agent 返回域名首页而非具体文章时，判定为合成数据
+_GENERIC_URL_PATTERNS: tuple[re.Pattern, ...] = (
+    re.compile(r'^https?://[^/]+/?$'),                          # 纯域名无路径
+    re.compile(r'^https?://finance\.sina\.com\.cn/?$'),
+    re.compile(r'^https?://finance\.eastmoney\.com/?$'),
+    re.compile(r'^https?://(www\.)?xueqiu\.com/?$'),
+    re.compile(r'^https?://(www\.)?eastmoney\.com/?$'),
+    re.compile(r'^https?://research\.eastmoney\.com/?$'),
+    re.compile(r'^https?://(www\.)?cninfo\.com\.cn/?$'),
+    re.compile(r'^https?://(www\.)?stats\.gov\.cn/?$'),
+    re.compile(r'^https?://(www\.)?sxcoal\.com/?$'),
+    re.compile(r'^https?://(www\.)?coalmine\.org\.cn/?$'),
+    re.compile(r'^https?://paper\.cnstock\.com/?$'),
+)
+
 REQUIRED_DIM_KEYS = (
     "0_basic", "1_financials", "2_kline", "3_macro", "4_peers", "5_chain",
     "6_research", "7_industry", "8_materials", "9_futures", "10_valuation",
@@ -222,8 +239,75 @@ def validate(agent_analysis: dict) -> list:
                         _add(issues, "error", f"qualitative_deep_dive.{dim_k}.evidence",
                              "evidence 必须是 list",
                              '改为 [{"source": "...", "url": "...", "finding": "..."}, ...]')
+                    elif _is_list(ev):
+                        # v3.x · 合成数据检测（Gate 2 硬阻断标准）
+                        _check_evidence_quality(issues, dim_k, ev)
 
     return issues
+
+
+def _check_evidence_quality(issues: list, dim_k: str, ev: list) -> None:
+    """逐条校验 evidence 的 url/source/finding 质量，检测合成数据。"""
+    dict_items = [e for e in ev if isinstance(e, dict)]
+    if not dict_items:
+        _add(issues, "error", f"qualitative_deep_dive.{dim_k}.evidence",
+             "evidence 列表为空或所有项均为非 dict",
+             "每条 evidence 必须是 dict 含 source/url/finding")
+        return
+
+    empty_url = 0
+    generic_url = 0
+    missing_source = 0
+    short_finding = 0
+    seen_urls: set[str] = set()
+    dup_url = 0
+
+    for idx, e in enumerate(dict_items):
+        url = str(e.get("url", "")).strip()
+
+        if not url:
+            empty_url += 1
+        else:
+            if any(p.search(url) for p in _GENERIC_URL_PATTERNS):
+                generic_url += 1
+            if url in seen_urls:
+                dup_url += 1
+            else:
+                seen_urls.add(url)
+
+        if not e.get("source"):
+            missing_source += 1
+
+        finding = str(e.get("finding", ""))
+        if len(finding.strip()) < 10:
+            short_finding += 1
+
+    n = len(dict_items)
+    if empty_url > 0:
+        _add(issues, "error",
+             f"qualitative_deep_dive.{dim_k}.evidence",
+             f"{empty_url}/{n} 条 evidence 缺少 url 字段",
+             "每条 evidence 必须有 url，参考 task2.5 规范第 382 行")
+    if generic_url > 0:
+        _add(issues, "error",
+             f"qualitative_deep_dive.{dim_k}.evidence",
+             f"{generic_url}/{n} 条 url 是通用域名（非具体文章 URL），可能是合成数据",
+             "url 必须指向具体文章页面（含路径），而非首页/域名。请用 WebSearch 获取真实 URL 后重写。")
+    if missing_source > 0:
+        _add(issues, "warning",
+             f"qualitative_deep_dive.{dim_k}.evidence",
+             f"{missing_source}/{n} 条缺少 source 字段",
+             '加 "source": "来源名称"')
+    if short_finding > 0:
+        _add(issues, "warning",
+             f"qualitative_deep_dive.{dim_k}.evidence",
+             f"{short_finding}/{n} 条 finding 过短（< 10 字）",
+             "每条 finding 至少 10 字，说明具体证据内容")
+    if dup_url > 0:
+        _add(issues, "warning",
+             f"qualitative_deep_dive.{dim_k}.evidence",
+             f"{dup_url}/{n} 条 url 与其他条目相同",
+             "每条 evidence 应有独立的来源 URL")
 
 
 def format_issues(issues: list) -> str:
