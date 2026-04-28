@@ -216,6 +216,197 @@ def agent_analysis_template(ticker: str, stock_name: str = "", extra: dict | Non
     return template
 
 
+# ═══════════════════════════════════════════════════════════════
+# v3.5 · 缓存清理 — 一键清除某只股票的所有缓存
+# ═══════════════════════════════════════════════════════════════
+
+def _resolve_ticker_dirs(ticker: str) -> list[Path]:
+    """Resolve all cache directories matching a ticker.
+
+    Handles: '00700.HK', '00700', '700'
+    Returns list of matching .cache/{ticker}/ directories.
+    """
+    ticker_upper = ticker.upper().strip()
+    if not CACHE_ROOT.exists():
+        return []
+
+    dirs = []
+    for d in CACHE_ROOT.iterdir():
+        if not d.is_dir():
+            continue
+        dname = d.name.upper()
+        if ticker_upper == dname:
+            dirs.append(d)
+        # Also match bare code (e.g. '00700') when ticker='00700.HK'
+        elif ticker_upper.endswith(('.HK', '.SZ', '.SH')) and dname == ticker_upper.rsplit('.', 1)[0]:
+            dirs.append(d)
+    return dirs
+
+
+def _match_lixinger_files(ticker: str) -> list[Path]:
+    """Find Lixinger cache files related to a ticker."""
+    lx_dir = CACHE_ROOT / "lixinger"
+    if not lx_dir.exists():
+        return []
+
+    from lib.market_router import parse_ticker as _parse
+    try:
+        ti = _parse(ticker)
+    except Exception:
+        return []
+
+    # Collect all code variants that could appear in cache keys
+    codes = {ti.code}  # bare code e.g. '700'
+    codes.add(ti.code.zfill(5))  # zero-padded e.g. '00700'
+    if ti.full:
+        codes.add(ti.full.upper())  # full e.g. '00700.HK'
+
+    # Also try the raw ticker itself
+    codes.add(ticker.upper().replace('.HK', '').replace('.SZ', '').replace('.SH', ''))
+
+    files = []
+    for f in lx_dir.iterdir():
+        if not f.is_file():
+            continue
+        fname = f.name.upper()
+        for c in codes:
+            if f"__{c}__" in fname or f"__{c}_" in fname or fname.endswith(f"__{c}"):
+                files.append(f)
+                break
+    return files
+
+
+def clear_ticker_cache(
+    ticker: str,
+    *,
+    keep_reports: bool = True,
+    keep_agent: bool = False,
+    dry_run: bool = False,
+) -> dict:
+    """Clear all cached data for a single stock.
+
+    Args:
+        ticker: Stock ticker like '00700.HK' or '00700'
+        keep_reports: Preserve generated HTML reports
+        keep_agent: Preserve agent_analysis.json (expensive manual work)
+        dry_run: Only report what would be deleted, don't delete
+
+    Returns:
+        dict with counts of deleted/kept items and freed bytes
+    """
+    result = {
+        "ticker": ticker,
+        "deleted_dirs": [],
+        "deleted_files": [],
+        "kept_files": [],
+        "freed_bytes": 0,
+    }
+
+    # 1. Per-ticker cache directories
+    for d in _resolve_ticker_dirs(ticker):
+        size = sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
+        if not dry_run:
+            import shutil
+            shutil.rmtree(d)
+        result["deleted_dirs"].append({"path": str(d), "size": size})
+        result["freed_bytes"] += size
+
+    # 2. Lixinger cache files
+    for f in _match_lixinger_files(ticker):
+        size = f.stat().st_size
+        if not dry_run:
+            f.unlink()
+        result["deleted_files"].append({"path": str(f), "size": size, "source": "lixinger"})
+        result["freed_bytes"] += size
+
+    # 3. Reports directory (unless keep_reports)
+    if not keep_reports:
+        reports_dir = Path("reports")
+        if reports_dir.exists():
+            ticker_upper = ticker.upper().strip()
+            for d in reports_dir.iterdir():
+                if d.is_dir() and d.name.upper().startswith(ticker_upper):
+                    size = sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
+                    if not dry_run:
+                        import shutil
+                        shutil.rmtree(d)
+                    result["deleted_dirs"].append({"path": str(d), "size": size, "source": "reports"})
+                    result["freed_bytes"] += size
+
+    # 4. Agent analysis (if keep_agent, exclude from deletion)
+    if keep_agent:
+        for d in _resolve_ticker_dirs(ticker):
+            aa = d / "agent_analysis.json"
+            if aa.exists():
+                result["kept_files"].append(str(aa))
+
+    result["freed_mb"] = round(result["freed_bytes"] / (1024 * 1024), 2)
+    return result
+
+
+def clear_all_cache(*, keep_reports: bool = True, dry_run: bool = False) -> dict:
+    """Nuclear option: clear ALL cached data for ALL stocks."""
+    result = {"tickers": [], "total_freed_mb": 0.0, "total_freed_bytes": 0}
+    if not CACHE_ROOT.exists():
+        return result
+
+    for d in sorted(CACHE_ROOT.iterdir()):
+        if d.is_dir() and d.name != "lixinger":
+            # Only ticker dirs (exclude lixinger and _global)
+            r = clear_ticker_cache(
+                d.name,
+                keep_reports=keep_reports,
+                keep_agent=False,
+                dry_run=dry_run,
+            )
+            if r["freed_bytes"] > 0:
+                result["tickers"].append(d.name)
+                result["total_freed_bytes"] += r["freed_bytes"]
+
+    # Lixinger cache
+    lx_dir = CACHE_ROOT / "lixinger"
+    if lx_dir.exists():
+        lx_size = sum(f.stat().st_size for f in lx_dir.rglob("*") if f.is_file())
+        if not dry_run:
+            import shutil
+            shutil.rmtree(lx_dir)
+        result["total_freed_bytes"] += lx_size
+
+    result["total_freed_mb"] = round(result["total_freed_bytes"] / (1024 * 1024), 2)
+    return result
+
+
+def list_cached_tickers() -> list[dict]:
+    """List all cached tickers with their sizes and artifact status."""
+    if not CACHE_ROOT.exists():
+        return []
+
+    tickers = []
+    for d in sorted(CACHE_ROOT.iterdir()):
+        if not d.is_dir() or d.name in ("lixinger", "_global"):
+            continue
+        size = sum(f.stat().st_size for f in d.rglob("*") if f.is_file())
+        artifacts = [f.name for f in d.iterdir() if f.is_file()]
+        tickers.append({
+            "ticker": d.name,
+            "size_mb": round(size / (1024 * 1024), 2),
+            "artifacts": sorted(artifacts),
+        })
+
+    # Lixinger cache
+    lx_dir = CACHE_ROOT / "lixinger"
+    if lx_dir.exists():
+        lx_size = sum(f.stat().st_size for f in lx_dir.rglob("*") if f.is_file())
+        lx_files = [f.name for f in lx_dir.iterdir() if f.is_file()]
+        tickers.append({
+            "ticker": "(lixinger shared cache)",
+            "size_mb": round(lx_size / (1024 * 1024), 2),
+            "artifacts": sorted(lx_files)[:10] + (["..."] if len(lx_files) > 10 else []),
+        })
+
+    return tickers
+
+
 def read_task_output(ticker: str, task_name: str) -> dict | None:
     path = CACHE_ROOT / ticker / f"{task_name}.json"
     if not path.exists():

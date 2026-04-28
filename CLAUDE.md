@@ -37,10 +37,35 @@ v2.10.4 起 CLI 直跑 `agent_analysis.json` 缺失自动降级 warning，照样
 - `AGENTS.md` — 完整 agent 指令
 - `skills/deep-analysis/SKILL.md` — 深度分析工作流
 - `skills/deep-analysis/scripts/run_real_test.py` — 主引擎
+- `skills/deep-analysis/scripts/clear_cache.py` — 缓存清理工具（v3.5）
 - `commands/analyze-stock.md` — `/analyze-stock` 命令
+
+## 缓存管理（v3.5）
+
+```bash
+cd skills/deep-analysis/scripts
+
+# 列出所有已缓存的股票
+python clear_cache.py --list
+
+# 预览某只股票的缓存（不删除）
+python clear_cache.py 00700.HK --dry-run
+
+# 清除某只股票的全部缓存
+python clear_cache.py 00700.HK
+
+# 清除某只股票的全部缓存 + 报告
+python clear_cache.py 00700.HK --rm-reports
+
+# 核选项：清除所有缓存
+python clear_cache.py --all
+```
+
+缓存层级：`.cache/{ticker}/`（raw_data/dimensions/panel/agent_analysis） + `.cache/lixinger/`（理杏仁API） + `reports/{ticker}_*/`（HTML报告）
 
 ## 缓存数据结构速查
 
 - `raw_data.json`: `{ ticker, market, dimensions: { "1_financials": { data: {...}, source, fallback }, ... }, fund_managers: [...], similar_stocks: [...] }`
 - `dimensions.json`: `{ fundamental_score, dimensions: { "1_financials": { score, weight, label, reasons_pass, reasons_fail }, ... } }`
 - `panel.json`: `{ panel_consensus, vote_distribution, signal_distribution, investors: [{ investor_id, name, group, signal, score, headline, reasoning, verdict }] }`
+- `agent_analysis.json`: `{ agent_reviewed, dim_commentary, panel_insights, great_divide_override, narrative_override }` — Gate 1 校验，必须通过 `write_task_output()` 写入

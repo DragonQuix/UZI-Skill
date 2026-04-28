@@ -1020,6 +1020,12 @@ echo "${CODEX:-${OPENAI_API_KEY:+codex_via_openai}}"
 ### 数据质量
 - `lib.data_integrity.validate(raw)` — 100% 覆盖度校验器
 
+### 缓存管理（v3.5）
+- `clear_cache.py <ticker>` — 清除单只股票全部缓存（含 Lixinger + 报告）
+- `clear_cache.py --list` — 列出所有已缓存股票及大小
+- `clear_cache.py --all` — 核选项：清除全部缓存
+- `lib.cache.clear_ticker_cache(ticker)` — Python API 清除指定股票
+
 ## 📚 详细参考文档
 
 - `references/task1-data-collection.md` — 22 维 fetcher 清单 + 并行策略

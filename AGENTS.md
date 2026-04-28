@@ -24,6 +24,7 @@ UZI-Skill/                                  # ← 你 cwd 应该是这里
         ├── assemble_report.py              # HTML shell 组装 (v3.2 瘦身后 587 行)
         ├── fetch_*.py (22 个)              # 数据采集 · 也是独立 CLI (python fetch_basic.py <ticker>)
         ├── compute_*.py                    # 机构建模 (DCF / BCG / Porter)
+        ├── clear_cache.py                    # 🆕 v3.5 缓存清理 · python clear_cache.py <ticker>
         ├── tests/                          # 332 pytest
         ├── .cache/<ticker>/                # 跑过的股票缓存
         ├── reports/<ticker>_<date>/        # 生成的 HTML 报告
@@ -53,6 +54,8 @@ UZI-Skill/                                  # ← 你 cwd 应该是这里
 | 用户一句话分析 | `python run.py <ticker>` (repo root · 走 v3.0 pipeline) |
 | 强制老路径 (保险) | `UZI_LEGACY=1 python run.py <ticker>` |
 | 只跑单个 fetcher | `cd skills/deep-analysis/scripts && python fetch_basic.py <ticker>` |
+| 清除某只股票缓存 | `cd skills/deep-analysis/scripts && python clear_cache.py <ticker>` |
+| 列出所有缓存 | `cd skills/deep-analysis/scripts && python clear_cache.py --list` |
 | 跑全量 pytest | `cd skills/deep-analysis/scripts && pytest tests/ -q` |
 | Python 环境 | 用户通常用 `~/miniconda3/bin/python`（`/usr/bin/python3` 没装 akshare/pytest） |
 

@@ -85,7 +85,8 @@ def _fetch_valuation_via_lixinger(ti, current_pe=None, current_pb=None) -> dict 
         return None
 
     market = "hk" if ti.market == "H" else "cn"
-    raw = lx_valhist(ti.code, market=market, years_back=5)
+    code = ti.code.zfill(5) if market == "hk" else ti.code
+    raw = lx_valhist(code, market=market, years_back=5)
     if not raw or not raw.get("metrics"):
         return None
 
