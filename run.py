@@ -242,13 +242,25 @@ def _maybe_prompt_update() -> None:
     if not sys.stdin.isatty():
         return
     try:
-        from lib.update_check import check_for_update, format_prompt, handle_answer
+        from lib.update_check import check_for_update, format_prompt, handle_answer, auto_update
     except Exception:
         return
     try:
         info = check_for_update()
         if info is None:
             return
+
+        # 自动更新模式（UZI_AUTO_UPDATE=1）
+        if os.environ.get("UZI_AUTO_UPDATE") == "1":
+            print(f"\n📦 UZI-Skill 检测到新版本 v{info.latest}（当前 v{info.current}），自动更新中...")
+            err = auto_update(info)
+            if err is None:
+                print(f"✅ 已自动更新到 v{info.latest}，重启后生效\n")
+            else:
+                print(f"⚠️ 自动更新失败: {err}\n")
+            return
+
+        # 交互模式
         print(format_prompt(info))
         try:
             ans = input("请选择 [y/s/n]（回车默认 n）: ").strip()

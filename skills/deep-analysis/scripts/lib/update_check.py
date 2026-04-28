@@ -17,7 +17,7 @@ import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
-GITHUB_REPO = "wbh604/UZI-Skill"
+GITHUB_REPO = "DragonQuix/UZI-Skill"
 CACHE_TTL_SEC = 6 * 3600  # 6h · 避免 GH API 限流
 HTTP_TIMEOUT = 5  # 失败快速放行
 
@@ -197,9 +197,31 @@ def handle_answer(answer: str, latest: str) -> str:
             f"→ 请按 README 里你当前 agent 的更新命令操作：\n"
             f"  Claude Code: /plugin update stock-deep-analyzer\n"
             f"  git clone: cd UZI-Skill && git pull\n"
-            f"  Hermes: hermes skills update wbh604/UZI-Skill/skills/deep-analysis"
+            f"  Hermes: hermes skills update DragonQuix/UZI-Skill/skills/deep-analysis"
         )
     return "→ 好的，下次启动再问"
+
+
+def auto_update(info: UpdateInfo) -> str | None:
+    """自动执行 git pull（由 UZI_AUTO_UPDATE=1 触发）。
+    返 None 表示成功，返字符串为错误信息。
+    """
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["git", "pull", "origin", "main"],
+            cwd=str(_PLUGIN_ROOT),
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode == 0:
+            return None  # 成功
+        return f"git pull 失败 (exit {result.returncode}): {result.stderr.strip()[:300]}"
+    except FileNotFoundError:
+        return "git 命令不可用，请手动执行: cd UZI-Skill && git pull"
+    except subprocess.TimeoutExpired:
+        return "git pull 超时，请检查网络后手动更新"
+    except Exception as e:
+        return f"自动更新异常: {e}"
 
 
 if __name__ == "__main__":
