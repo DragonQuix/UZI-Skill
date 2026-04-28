@@ -805,16 +805,19 @@ def _fetch_basic_hk(ti: TickerInfo) -> dict:
         except Exception as e:
             out["_mx_err"] = f"{type(e).__name__}: {str(e)[:120]}"
 
-    # v2.6 · QUATERNARY · Tencent qt 兜底（HK price 在前 3 层都缺时常发生）
-    if not out.get("price"):
+    # v2.6 · QUATERNARY · Tencent qt 兜底（HK price/name 在前 3 层都缺时常发生）
+    if not out.get("price") or not out.get("name"):
         qt = _fetch_price_tencent_qt("H", code5)
-        if qt.get("price"):
+        if not out.get("name") and qt.get("name"):
+            out["name"] = qt["name"]
+        if not out.get("price") and qt.get("price"):
             out["price"] = qt["price"]
             out["change_pct"] = out.get("change_pct") or qt.get("change_pct")
             out["open"] = out.get("open") or qt.get("open")
             out["prev_close"] = out.get("prev_close") or qt.get("prev_close")
             out["high"] = out.get("high") or qt.get("high")
             out["low"] = out.get("low") or qt.get("low")
+        if qt.get("name") or qt.get("price"):
             out["_fallback_snap"] = (out.get("_fallback_snap", "") + "+tencent_qt").lstrip("+")
 
     return out

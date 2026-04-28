@@ -92,6 +92,7 @@ def main(user_input: str) -> dict:
                         r = rows[0]
                         for key, label in [
                             ("ipoDate", "ipo_date"),
+                            ("name", "name"),
                             ("listingStatus", "listing_status"),
                             ("exchange", "exchange"),
                             ("mutualMarketFlag", "stock_connect"),
@@ -100,6 +101,10 @@ def main(user_input: str) -> dict:
                             val = r.get(key)
                             if val is not None:
                                 data["_lx_" + label] = val
+                        # v3.6 · 理杏仁 name 直接覆盖主字段（修复港股 name 缺失）
+                        lx_name = r.get("name")
+                        if lx_name and not data.get("name"):
+                            data["name"] = lx_name
                         data["_lx_enriched"] = True
                         # v3.0 · 理杏仁行业分类（申万/中信）
                         try:

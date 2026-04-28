@@ -73,9 +73,32 @@ if low_quality_dims:
 
 把 4 个 agent 返回的 {signal, score, headline, reasoning} 覆盖到 `.cache/{ticker}/panel.json` 的对应投资者上。
 
-**4. 写 agent_analysis.json（闭环关键！）**
+**4. 补全定性深研（🔴 v3.6 硬门禁 · 不可跳过）**
 
-对关键维度（财报/估值/护城河/行业）写 1-2 句定性评语。如果需要，web search 补充信息。
+`qualitative_deep_dive` 覆盖 6 个爬虫无法推理的维度的因果分析。**必须在调用 write_task_output() 之前完成。**
+
+Spawn **3 个并行 sub-agent**，每个覆盖 2 个维度：
+
+| Sub-agent | 维度 | 核心问题 |
+|-----------|------|----------|
+| **Macro-Policy** | 3_macro + 13_policy | 利率/汇率/地缘如何传导到这只股？政策对业务的量化影响？ |
+| **Industry-Events** | 7_industry + 15_events | 赛道在生命周期的哪个阶段？近期事件的货币化影响？ |
+| **Cost-Transmission** | 8_materials + 9_futures | 原材料涨价能否顺价？毛利率弹性？期货 contango/backwardation 含义？ |
+
+每个 sub-agent 的输出格式：
+```json
+{
+  "evidence": [{"source": "来源名", "url": "https://...", "finding": "发现", "retrieved_at": "2026-04-28"}],
+  "associations": [{"causal_chain": "X → Y → Z 影响股价", "estimated_impact": "±X%"}],
+  "conclusion": "2-3 句量化结论"
+}
+```
+
+参考详细操作手册：`skills/deep-analysis/references/task2.5-qualitative-deep-dive.md`
+
+**5. 写 agent_analysis.json（闭环关键！）**
+
+对关键维度（财报/估值/护城河/行业）写 1-2 句定性评语。将步骤 4 的 qualitative_deep_dive 结果填入。
 
 **⚠️ 必须使用模板 + API，禁止直接用 Path.write_text()：**
 
@@ -85,21 +108,28 @@ from lib.cache import agent_analysis_template, write_task_output
 # Step 1: 获取带注释的预填充模板（所有必填字段已就位）
 aa = agent_analysis_template(ticker, stock_name="山西汾酒")
 
-# Step 2: 填入实际值 — 只需替换【待填充】占位符
+# Step 2: 填入 dim_commentary + panel_insights + great_divide + narrative
 aa["dim_commentary"]["1_financials"] = "ROE 33.5% 连续五年 > 15%，净利率 31.6%..."
 aa["panel_insights"] = "51 位评委中 12 人看多..."
-# ... 填充所有维度
 
-# Step 3: 写入（自动校验 schema，error 级阻断）
+# Step 3: 填入 qualitative_deep_dive（步骤 4 的 3 个 sub-agent 输出）
+aa["qualitative_deep_dive"] = {
+    "3_macro": { 宏观 sub-agent 输出 },
+    "7_industry": { 行业 sub-agent 输出 },
+    ...
+}
+
+# Step 4: 写入（自动校验 schema，error 级阻断）
 write_task_output(ticker, "agent_analysis", aa)
 ```
 
 **模板已包含所有必填字段**：`buy_zones` 四派系 (value/growth/technical/youzi)、`qualitative_deep_dive` 6 维结构、`data_gap_acknowledged`。
 你只需替换 `【待填充】` 占位符，不用记字段名。
 
-### 第三段 · 生成报告 + 自动补漏（v3.3 自愈循环）
+### 第三段 · 生成报告（脚本完成）
 
-> ⚠️ 本段包含**不可跳过的强制步骤**。Stage 2 成功后必须立即执行第三步。
+> ⚠️ v3.6 起：如果 qualitative_deep_dive 在 medium/deep 模式下缺失，stage2 会 **raise RuntimeError 阻断**（Gate 2 硬门禁）。
+> 正常情况第一遍 stage2 就应该通过。以下自愈流程仅用于处理 dim_commentary 覆盖率不足或 causal associations 不够等非阻断问题。
 
 **第一步 · 运行 stage2**
 
@@ -109,11 +139,11 @@ python -c "from run_real_test import stage2; stage2('$ARGUMENTS')"
 
 stage2 会自动读取 panel.json + agent_analysis.json，合并生成最终报告。
 
-**⚠️ 如果 stage2 因结构性错误失败（RuntimeError）**：
-读 `_agent_analysis_errors.json` → 逐条修复 → 用 `write_task_output()` 重写 agent_analysis.json → 重跑 stage2。
-这些是可以在 1 分钟内修复的翻译错误（缺 key / 类型不对 / 字符串太短）。
+**⚠️ 如果 stage2 因 Gate 1/Gate 2 失败（RuntimeError）**：
+- **Gate 1**（`_validated_by != "write_task_output"`）：用 `write_task_output()` 重写 agent_analysis.json → 重跑 stage2
+- **Gate 2**（`qualitative_deep_dive` 缺失）：回第二段步骤 4，spawn 3 个 sub-agent → 填入 agent_analysis.json → `write_task_output()` → 重跑 stage2
 
-**第二步 · 强制检查 pending（🔴 不可跳过）**
+**第二步 · 检查 pending（安全网）**
 
 ```python
 import json
@@ -126,15 +156,16 @@ else:
 ```
 
 - 如果 `pending` 为空 → **直接跳到第四段汇报**
-- 如果 `pending` 非空 → **必须执行第三步自主修复**，修复完成前不要向用户汇报
+- 如果 `pending` 非空 → 执行第三步自主修复
 
-**第三步 · 自主修复循环（🔴 不询问用户，最多 2 轮）**
+**第三步 · 自主修复（不询问用户，最多 2 轮）**
 
 | pending key | 修复方式 |
 |---|---|
-| `qualitative_deep_dive` | spawn 3 parallel sub-agents (Macro-Policy / Industry-Events / Cost-Transmission)，搜 web → 填充 evidence/associations/conclusion |
-| `qualitative_deep_dive_associations` | 基于已有的 agent 分析上下文，补写跨域因果链 |
+| `qualitative_deep_dive_associations` | 基于已有的 agent 分析上下文，补写跨域因果链（≥ 3 条） |
 | `dim_commentary_coverage` | 读 raw_data.json 该维度数据 → 写 1-2 句定性评语（≥20 字） |
+
+> `qualitative_deep_dive` 缺失不再出现在此表中——它在 stage2 中是硬阻断（Gate 2），必须修复后才能跑到这里。
 
 修复后必须执行：
 ```python

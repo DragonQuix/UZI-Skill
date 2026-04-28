@@ -672,17 +672,31 @@ def stage2(ticker: str) -> str:
 
         # v3.3 · 收集所有 deferred 改进项 → _pending_improvements.json
         pending: dict[str, dict] = {}
+        # v3.6 · HARD-GATE-QUALITATIVE → 从软警告升级为硬阻断
+        # 之前: 仅打印 ⚠️ + 写入 _pending_improvements.json，报告照样生成
+        # 问题: Agent 看到报告成功就不会回头自愈，导致 6 维永远空缺
+        # 现在: 与 Gate 1 同级的 RuntimeError，强制 Agent 修复后再重跑 stage2
         if missing_qd:
-            pending["qualitative_deep_dive"] = {
-                "missing_dims": missing_qd,
-                "total_evidence": total_evidence,
-                "total_associations": total_assoc,
-                "estimated_fix": "spawn 3 parallel sub-agents (Macro-Policy / Industry-Events / Cost-Transmission), ~90s",
-                "instructions": "对每维做 web search → 填充 evidence[{source, url, finding, retrieved_at}] + associations[{causal_chain, estimated_impact}] + conclusion",
-            }
-            print(f"   ⚠️  qualitative_deep_dive: 缺失 {len(missing_qd)}/6 维 ({','.join(missing_qd)})")
-            print(f"      → 参考 references/task2.5-qualitative-deep-dive.md")
-            print(f"      → 应 spawn 3 个并行 sub-agent (Macro-Policy / Industry-Events / Cost-Transmission)")
+            from lib.analysis_profile import get_profile as _get_profile
+            _profile = _get_profile()
+            if _profile.require_qualitative_deep_dive:
+                # v3.6 · 硬门禁阻断 — 不修复不让过
+                _err_lines = [
+                    f"\n⛔ Gate 2 阻断 — qualitative_deep_dive 缺失 {len(missing_qd)}/6 维 ({','.join(missing_qd)})",
+                    f"   当前 profile: {_profile.depth} · require_qualitative_deep_dive=True",
+                    f"",
+                    f"   ⚡ 必须执行的修复步骤:",
+                    f"   1. 读 .cache/{ti.full}/_pending_improvements.json",
+                    f"   2. Spawn 3 个并行 sub-agent (Macro-Policy / Industry-Events / Cost-Transmission)",
+                    f"      参考: references/task2.5-qualitative-deep-dive.md",
+                    f"   3. 用 write_task_output() 重写 agent_analysis.json（含 qualitative_deep_dive）",
+                    f"   4. 重跑 stage2('{ticker}')",
+                    f"",
+                    f"   这不是可选项 — 当前 profile 要求 qualitative_deep_dive 必须完成。",
+                ]
+                raise RuntimeError("\n".join(_err_lines))
+            # lite 模式不要求 deep_dive，仅警告
+            print(f"   ⚠️  qualitative_deep_dive: 缺失 {len(missing_qd)}/6 维（lite 模式跳过）")
         else:
             print(f"   qualitative_deep_dive: ✓ 6 维全覆盖 · evidence {total_evidence} 条 · associations {total_assoc} 条")
             if total_assoc < 3:
