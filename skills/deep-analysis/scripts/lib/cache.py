@@ -228,18 +228,58 @@ def normalize_qualitative_deep_dive(
     match the strict {evidence[], associations[], conclusion} schema enforced
     by Gate 2.  This function normalizes to the canonical form.
 
+    v3.7+: URL sentinel — detects bare-domain URLs (e.g. https://www.stats.gov.cn/)
+    that would fail Gate 1 validation and flags them for repair.  The sentinel
+    does NOT fabricate URLs; it marks low-quality entries so the validator can
+    provide actionable error messages.
+
     Returns: {"evidence": [...], "associations": [...], "conclusion": "..."}
     """
+    import re as _re
+
+    # ── URL 哨兵 · 通用域名检测 ──
+    _GENERIC_URL_RE = _re.compile(r'^https?://[^/]+/?$')
+    _KNOWN_GENERIC_HOSTS = {
+        'finance.sina.com.cn', 'finance.eastmoney.com.cn', 'www.eastmoney.com.cn',
+        'research.eastmoney.com.cn', 'www.xueqiu.com', 'xueqiu.com',
+        'www.cninfo.com.cn', 'www.stats.gov.cn', 'data.stats.gov.cn',
+        'www.mofcom.gov.cn', 'www.samr.gov.cn', 'www.midea.com',
+        'www.avc-mr.com', 'research.csc.com.cn', 'www.swsresearch.com',
+        'homea.cheaa.com', 'www.prnewswire.com', 'www.gelonghui.com',
+    }
+
+    def _check_url(url: str) -> dict:
+        """Return {url_ok: bool, url_repaired: str|None, url_flag: str|None}."""
+        if not url:
+            return {"url_ok": False, "url_repaired": None, "url_flag": "empty"}
+        if _GENERIC_URL_RE.match(url):
+            return {"url_ok": False, "url_repaired": None, "url_flag": "generic_domain"}
+        host = url.split('/')[2] if len(url.split('/')) > 2 else ''
+        if host in _KNOWN_GENERIC_HOSTS and '/' not in url.split(host)[1] if host else False:
+            pass  # already caught by _GENERIC_URL_RE above
+        return {"url_ok": True, "url_repaired": None, "url_flag": None}
+
     # Evidence: keep up to 5 entries, map to canonical keys
     evidence = []
+    url_warnings = 0
     for e in raw_agent_output.get("evidence", [])[:5]:
         if isinstance(e, dict):
-            evidence.append({
+            url = str(e.get("url", ""))
+            check = _check_url(url)
+            entry = {
                 "source": str(e.get("source", "")),
-                "url": str(e.get("url", "")),
+                "url": url,
                 "finding": str(e.get("finding", "")),
                 "retrieved_at": str(e.get("retrieved_at", "2026-04-29")),
-            })
+            }
+            if not check["url_ok"]:
+                url_warnings += 1
+                entry["_url_quality"] = check["url_flag"]
+                entry["_url_repair_note"] = (
+                    "URL 为通用域名首页而非具体文章页面，Gate 1 校验会阻断。"
+                    "请替换为含路径的具体文章 URL（如 .../202604/t20260416_1961734.html）"
+                )
+            evidence.append(entry)
 
     # Associations: keep up to 3 entries, add required schema keys
     associations = []
@@ -258,11 +298,17 @@ def normalize_qualitative_deep_dive(
         conclusion = str(conclusion)
     conclusion = str(conclusion)[:500]
 
-    return {
+    result = {
         "evidence": evidence,
         "associations": associations,
         "conclusion": conclusion,
     }
+    if url_warnings > 0:
+        result["_url_sentinel"] = {
+            "generic_count": url_warnings,
+            "note": f"{url_warnings} 条 evidence URL 为通用域名，需替换为具体文章 URL 后重新 write_task_output",
+        }
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -513,7 +559,7 @@ def read_task_output(ticker: str, task_name: str) -> dict | None:
     path = CACHE_ROOT / ticker / f"{task_name}.json"
     if not path.exists():
         return None
-    return json.loads(path.read_text(encoding="utf-8"))
+    return safe_load_agent_json(path)
 
 
 def require_task_output(ticker: str, task_name: str) -> dict:
