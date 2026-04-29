@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """Tiered JSON cache for fetcher scripts.
 
 TTL is differentiated by data volatility:
@@ -121,9 +122,20 @@ def write_task_output(ticker: str, task_name: str, data: dict) -> Path:
         except ImportError:
             pass  # validator not available, write anyway
 
+    # v3.8 · pre-write encoding validation
+    _json_str = json.dumps(data, ensure_ascii=False, indent=2, default=str)
+    try:
+        _json_str.encode("utf-8")
+    except UnicodeEncodeError as _enc_err:
+        raise RuntimeError(
+            f"write_task_output({task_name}): JSON contains characters that "
+            f"cannot be encoded as UTF-8 — {_enc_err}. "
+            f"Ensure all string values are valid Unicode."
+        ) from _enc_err
+
     path = CACHE_ROOT / ticker / f"{task_name}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    path.write_text(_json_str, encoding="utf-8")
     return path
 
 
@@ -135,6 +147,10 @@ def agent_analysis_template(ticker: str, stock_name: str = "", extra: dict | Non
     """Return a pre-populated agent_analysis.json template with all required
     fields and inline comments.  The Agent only needs to fill in the values —
     the structure, field names, and thresholds are enforced by the template.
+
+    v3.8+: Market-aware defaults — HK stocks get proper skip reasons for
+    dimensions that don't apply (16_lhb), so the Agent doesn't accidentally
+    write sub-20-char placeholder text.
 
     Usage from analyze-stock.md step 4:
         from lib.cache import agent_analysis_template, write_task_output
@@ -149,10 +165,33 @@ def agent_analysis_template(ticker: str, stock_name: str = "", extra: dict | Non
         "11_governance", "12_capital_flow", "13_policy", "14_moat", "15_events",
         "16_lhb", "17_sentiment", "18_trap", "19_contests",
     ]
+
+    # v3.8 · market-aware defaults
+    _t = ticker.upper().strip()
+    _is_hk = _t.endswith(".HK")
+    _is_us = _t.endswith((".US", ".NYSE", ".NASDAQ"))
+
+    _default_dim = "【待填充】基于 raw_data.json 写 1-2 句定性评语（≥20 字），引用具体数字"
+    _dim_defaults: dict[str, str] = {}
+
+    if _is_hk:
+        _dim_defaults["16_lhb"] = (
+            "港股无龙虎榜交易机制（无涨跌停板/无营业部席位公开数据），"
+            "此维度对港股自动跳过，16_lhb 评分不影响港股综合判断。"
+            "可关注 12_capital_flow 的南向资金流向和港股通持仓变化作为替代参考。"
+        )
+    elif _is_us:
+        _dim_defaults["16_lhb"] = (
+            "美股无龙虎榜交易机制（无涨跌停板/无营业部席位公开数据），"
+            "此维度对美股自动跳过，16_lhb 评分不影响美股综合判断。"
+            "可关注 12_capital_flow 的机构 13F 持仓变化和做空比率作为替代参考。"
+        )
+
+    _dim_commentary = {d: _dim_defaults.get(d, _default_dim) for d in dims}
     template: dict = {
         "agent_reviewed": True,
         "_comment": "本文件由 agent_analysis_template() 生成骨架。Agent 填入具体值后通过 write_task_output() 写入。",
-        "dim_commentary": {d: f"【待填充】基于 raw_data.json 写 1-2 句定性评语（≥20 字），引用具体数字" for d in dims},
+        "dim_commentary": _dim_commentary,
         "panel_insights": "【待填充 ≥30 字】51 评委投票分布 + 多空分歧分析 + 各组特征",
         "great_divide_override": {
             "punchline": "【待填充 ≥10 字】基本面派 vs 技术派的核心冲突金句",
