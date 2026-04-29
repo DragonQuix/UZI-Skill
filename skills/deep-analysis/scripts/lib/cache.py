@@ -216,6 +216,108 @@ def agent_analysis_template(ticker: str, stock_name: str = "", extra: dict | Non
     return template
 
 
+def normalize_qualitative_deep_dive(
+    raw_agent_output: dict,
+    dim_name: str,
+    link_to_dim: str = "1_financials",
+) -> dict:
+    """Convert free-form agent deep-dive output to the schema expected by stage2.
+
+    Agent outputs for qualitative_deep_dive often contain extra keys
+    (cross_causal_chains, sensitivity, industry_analysis, etc.) that don't
+    match the strict {evidence[], associations[], conclusion} schema enforced
+    by Gate 2.  This function normalizes to the canonical form.
+
+    Returns: {"evidence": [...], "associations": [...], "conclusion": "..."}
+    """
+    # Evidence: keep up to 5 entries, map to canonical keys
+    evidence = []
+    for e in raw_agent_output.get("evidence", [])[:5]:
+        if isinstance(e, dict):
+            evidence.append({
+                "source": str(e.get("source", "")),
+                "url": str(e.get("url", "")),
+                "finding": str(e.get("finding", "")),
+                "retrieved_at": str(e.get("retrieved_at", "2026-04-29")),
+            })
+
+    # Associations: keep up to 3 entries, add required schema keys
+    associations = []
+    for i, a in enumerate(raw_agent_output.get("associations", [])[:3]):
+        if isinstance(a, dict):
+            associations.append({
+                "link_to": link_to_dim,
+                "chain_id": f"chain_{dim_name}_{i}",
+                "causal_chain": str(a.get("causal_chain", "")),
+                "estimated_impact": str(a.get("estimated_impact", "中")),
+            })
+
+    # Conclusion: unwrap if nested dict, truncate to 500 chars
+    conclusion = raw_agent_output.get("conclusion", "")
+    if isinstance(conclusion, dict):
+        conclusion = str(conclusion)
+    conclusion = str(conclusion)[:500]
+
+    return {
+        "evidence": evidence,
+        "associations": associations,
+        "conclusion": conclusion,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
+# v3.6 · Agent 输出工具 — 健壮 JSON 加载 + panel 合并 + 深研归一化
+# ═══════════════════════════════════════════════════════════════
+
+def safe_load_agent_json(path: Path) -> dict:
+    """Robustly load agent-generated JSON, auto-fixing Chinese double-quote
+    nesting (e.g. '国十条' inside a JSON string value).
+
+    Agent LLMs routinely emit Chinese-context ASCII double quotes within JSON
+    string values, which breaks standard JSON parsing.  This function first
+    tries standard parsing, and only applies targeted fixes on failure -
+    valid JSON passes through untouched.
+
+    Fix strategy (only applied when json.loads fails):
+      1. Replace curly quotes (some agents use them)
+      2. Replace Chinese-context ASCII quotes on the same line
+      3. Re-raise the original error if all fixes fail
+    """
+    import re as _re
+
+    text = path.read_text(encoding="utf-8")
+
+    # Fast path: most agent outputs are valid JSON
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Fix path: only applied when standard parsing fails
+    fixed = text
+    fixed = fixed.replace(""", "「").replace(""", "」")  # " " → 「」
+
+    # Chinese-char + " + short Chinese text + " + Chinese-char (same line only)
+    fixed = _re.sub(
+        r'([一-鿿，、。；：）)+])'
+        r'"'
+        r'([^\"\n]{1,40})'
+        r'"'
+        r'([一-鿿\d，、。；：（(])',
+        r'\1「\2」\3',
+        fixed,
+    )
+
+    # Edge case: symbol + "ChineseText" + symbol (e.g. + "报行合一" +)
+    fixed = _re.sub(
+        r'([\s+])"([一-鿿][^\"\n]{0,30}[一-鿿])"([\s)）→，、。；：+])',
+        r'\1「\2」\3',
+        fixed,
+    )
+
+    return json.loads(fixed)
+
+
 # ═══════════════════════════════════════════════════════════════
 # v3.5 · 缓存清理 — 一键清除某只股票的所有缓存
 # ═══════════════════════════════════════════════════════════════
