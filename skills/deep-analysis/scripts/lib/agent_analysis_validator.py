@@ -316,25 +316,25 @@ def _check_evidence_quality(issues: list, dim_k: str, ev: list) -> None:
 
 
 def format_issues(issues: list) -> str:
-    """Pretty-print issues for console output."""
+    """Pretty-print issues for console output (ASCII-safe for Windows GBK terminals)."""
     if not issues:
-        return "✅ agent_analysis.json schema 校验通过"
+        return "[OK] agent_analysis.json schema validation passed"
     lines = []
     errs = [i for i in issues if i.severity == "error"]
     warns = [i for i in issues if i.severity == "warning"]
     if errs:
-        lines.append(f"🔴 schema 错误 {len(errs)} 条（结构性，会导致 stage2 fallback）：")
+        lines.append(f"[ERROR] {len(errs)} schema error(s) — structural, stage2 will fallback:")
         for i in errs[:10]:
-            lines.append(f"   · {i.field}: {i.message}")
-            lines.append(f"     → {i.suggestion}")
+            lines.append(f"   - {i.field}: {i.message}")
+            lines.append(f"     -> {i.suggestion}")
         if len(errs) > 10:
-            lines.append(f"   ... 还有 {len(errs) - 10} 条")
+            lines.append(f"   ... {len(errs) - 10} more")
     if warns:
-        lines.append(f"🟡 schema 警告 {len(warns)} 条（质量问题，stage2 仍会用，但报告可能不达标）：")
+        lines.append(f"[WARN] {len(warns)} schema warning(s) — quality, stage2 OK but report quality may degrade:")
         for i in warns[:10]:
-            lines.append(f"   · {i.field}: {i.message}")
+            lines.append(f"   - {i.field}: {i.message}")
         if len(warns) > 10:
-            lines.append(f"   ... 还有 {len(warns) - 10} 条")
+            lines.append(f"   ... {len(warns) - 10} more")
     return "\n".join(lines)
 
 

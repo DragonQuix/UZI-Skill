@@ -109,11 +109,11 @@ def write_task_output(ticker: str, task_name: str, data: dict) -> Path:
             issues = _validate(data)
             errs = [i for i in issues if i.severity == "error"]
             if errs:
-                msg = ["agent_analysis.json 写入被阻断 — 以下字段必须修复:"]
+                msg = ["agent_analysis.json write blocked — fix these fields before retry:"]
                 for e in errs:
-                    msg.append(f"  🔴 {e.field}: {e.message}")
-                    msg.append(f"     → {e.suggestion}")
-                msg.append(f"\n  共 {len(errs)} 条结构性错误，修复后重试 write_task_output")
+                    msg.append(f"  [ERROR] {e.field}: {e.message}")
+                    msg.append(f"     -> {e.suggestion}")
+                msg.append(f"\n  {len(errs)} structural error(s). Fix and retry write_task_output.")
                 raise RuntimeError("\n".join(msg))
             # v3.4 · 通过校验的打水印，供 stage2 识别合法来源
             data["_validated_by"] = "write_task_output"
@@ -324,7 +324,8 @@ def safe_load_agent_json(path: Path) -> dict:
     tries standard parsing, and only applies targeted fixes on failure -
     valid JSON passes through untouched.
 
-    Fix strategy (only applied when json.loads fails):
+    Fix layers (each only applied when previous parsing fails):
+      0. Strip markdown ```json / ``` code fences (agents often wrap output)
       1. Replace curly quotes (some agents use them)
       2. Replace Chinese-context ASCII quotes on the same line
       3. Re-raise the original error if all fixes fail
@@ -339,9 +340,17 @@ def safe_load_agent_json(path: Path) -> dict:
     except json.JSONDecodeError:
         pass
 
+    # Layer 0: strip markdown code fences (4/7 agents wrap JSON in ```json...```)
+    fixed = _re.sub(r'^```(?:json)?\s*\n', '', text.strip())
+    fixed = _re.sub(r'\n```\s*$', '', fixed)
+    if fixed != text:
+        try:
+            return json.loads(fixed)
+        except json.JSONDecodeError:
+            pass
+
     # Fix path: only applied when standard parsing fails
-    fixed = text
-    fixed = fixed.replace(""", "「").replace(""", "」")  # " " → 「」
+    fixed = fixed.replace("“", "「").replace("”", "」")  # " " → 「」
 
     # Chinese-char + " + short Chinese text + " + Chinese-char (same line only)
     fixed = _re.sub(

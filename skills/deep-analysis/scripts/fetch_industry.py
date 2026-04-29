@@ -66,16 +66,42 @@ INDUSTRY_ESTIMATES: dict[str, dict] = {
 
 
 def _best_industry_match(industry: str) -> dict:
+    """Match industry name against hand-curated INDUSTRY_ESTIMATES keys.
+
+    v3.7 · 安全匹配修复：
+      - LEGACY_ALIASES 增加 sw_2021 钢铁子分类（普钢/特钢/板材）
+      - 废弃 search_name[:2] in key 的松散前缀匹配，改为精确前缀匹配 +
+        白名单（仅允许有语义承载力的 2 字前缀），防止"电子"→"光电子器件"、
+        "金属"→"黑色金属" 等误命中
+    """
     if not industry:
         return {}
     # v3.6 · 新增旧名别名兼容（非理杏仁 fallback 可能返回旧行业名）
-    _LEGACY_ALIASES = {
+    # v3.7 · 扩展钢铁子分类 + 申万旧名兼容
+    _LEGACY_ALIASES: dict[str, str] = {
+        # 旧名别名
         "光学光电子": "光电子器件", "电池": "电气部件与设备",
         "白酒": "饮料", "钢铁": "黑色金属", "医药生物": "医疗保健设备与用品",
+        # v3.7 · sw_2021 钢铁子分类 → 黑色金属（防止回退丢失硬编码估值）
+        "普钢": "黑色金属", "特钢": "黑色金属", "板材": "黑色金属",
+        "钢管": "黑色金属", "铁矿石": "黑色金属",
+        # v3.7 · sw_2021 银行子分类 → 银行
+        "股份制银行": "银行", "城商行": "银行", "农商行": "银行",
     }
     search_name = _LEGACY_ALIASES.get(industry, industry)
+
+    # v3.7 · 安全前缀白名单：仅这些 2 字前缀允许模糊命中
+    # 防止"电子"→"光电子器件"、"金属"→"黑色金属"等误匹配
+    _SAFE_PREFIXES = frozenset({"医疗", "饮料", "银行", "半导体"})
+
     for key, val in INDUSTRY_ESTIMATES.items():
-        if key in search_name or search_name in key or search_name[:2] in key:
+        if key in search_name:
+            return val
+        # search_name in key 有最小长度门禁：2 字短名（如"电子"→"光电子器件"）不盲匹
+        if len(search_name) >= 3 and search_name in key:
+            return val
+        # 仅白名单前缀做短匹配（兜底 2 字分类名）
+        if len(search_name) >= 2 and search_name[:2] in _SAFE_PREFIXES and search_name[:2] in key:
             return val
     return {}
 
@@ -122,18 +148,34 @@ def _dynamic_industry_overview(industry: str) -> dict:
       - TAM 市场规模
       - lifecycle 阶段性关键词
     把抽到的 snippets 返回给 agent，由 agent 在 dim_commentary 里综合。
+
+    v3.7 · 搜索歧义修复：宽泛分类名（如"能源"）在搜索引擎中会命中
+    储能/光伏等不相关行业。增加 INDUSTRY_SEARCH_REFINEMENT 映射表，
+    将宽泛分类转为更精确的搜索关键词，让搜索结果匹配公司真实行业。
     """
     try:
         from lib.web_search import search_trusted
     except Exception:
         return {}
 
+    # v3.7 · 搜索词精炼：防止宽泛分类命中不相关行业
+    _SEARCH_REFINE: dict[str, str] = {
+        "能源": "石油天然气 原油 开采",
+        "金融": "银行 券商 保险",
+        "消费": "食品饮料 白酒 消费品",
+        "制造": "高端制造 装备",
+        "材料": "化工 有色金属 钢铁",
+        "信息": "软件 计算机 信息技术",
+        "医药": "创新药 医疗器械 医药生物",
+    }
+    search_industry = _SEARCH_REFINE.get(industry, industry)
+
     from datetime import datetime
     yr = datetime.now().year
     queries = {
-        "景气度": f"{yr} {industry} 行业景气度 增速 市场规模",
-        "TAM":    f"{industry} 行业规模 亿元 TAM 2026",
-        "周期":   f"{industry} 生命周期 成长期 成熟期 下行",
+        "景气度": f"{yr} {search_industry} 行业景气度 增速 市场规模",
+        "TAM":    f"{search_industry} 行业规模 亿元 TAM 2026",
+        "周期":   f"{search_industry} 生命周期 成长期 成熟期 下行",
     }
     snippets: dict[str, list] = {}
     for tag, q in queries.items():

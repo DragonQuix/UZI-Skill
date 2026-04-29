@@ -405,19 +405,37 @@ def fetch_company_info(stock_code: str, market: str = "cn") -> dict | None:
 
 
 def fetch_industries(stock_code: str, market: str = "cn") -> str | None:
-    """获取股票所属行业名称（申万/中信分类）。
+    """获取股票所属行业名称（申万优先，中证三级次之）。
 
     POST /api/cn/company/industries · 返回如 "石油石化" / "食品饮料"
     缓存 7 天（行业分类极少变动）。
+
+    v3.7 · 精度修复：理杏仁返回多源多级分类 (cni一级/二级/三级 + sw申万)，
+    旧版取 rows[0]（中证一级，如"能源"）过于宽泛，导致下游 fetch_industry 的
+    硬编码字典匹配失败、搜索词歧义（"能源"→储能/光伏而非石油天然气）。
+    改为 sw 优先 > cni 三级 > 一级，取最具体的行业名。
     """
     endpoint = f"{LIXINGER_BASE}/{market}/company/industries"
     body = {"token": _token(), "stockCode": stock_code}
     cache_key = f"industries__{market}__{stock_code}"
     rows = _cached(cache_key, lambda: _do_simple_fetch(endpoint, body),
                    ttl=7 * 24 * 60 * 60)
-    if rows:
-        return (rows[0] or {}).get("name")
-    return None
+    if not rows:
+        return None
+
+    names = [((r or {}).get("source", ""), (r or {}).get("name", "")) for r in rows]
+
+    # Prefer sw_2021 (最新版申万) → sw (旧版申万) → cni L3 → cni L1
+    for preferred_src in ("sw_2021", "sw"):
+        src_names = [name for src, name in names if src == preferred_src and name]
+        if src_names:
+            return src_names[-1]  # 取最深层级
+
+    cni_names = [name for src, name in names if src == "cni" and name]
+    if len(cni_names) >= 3:
+        return cni_names[2]  # cni 三级
+
+    return names[0][1] if names else None
 
 
 # ── internal ───────────────────────────────────────────────────────
