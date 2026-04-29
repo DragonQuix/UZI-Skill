@@ -328,6 +328,16 @@ def _fetch_basic_a_parallel(ti: TickerInfo) -> dict:
     if "market_cap_raw" in out and not isinstance(out.get("market_cap_raw"), (int, float)):
         del out["market_cap_raw"]
 
+    # v2.17 · 理杏仁行业 fallback — 上游源均未返回 industry 时补充
+    if not out.get("industry"):
+        try:
+            from .lixinger_client import fetch_industries
+            ind = fetch_industries(ti.code, "cn")
+            if ind:
+                out["industry"] = ind
+        except Exception:
+            pass
+
     out["_fallback_snap"] = out.get("_source", "parallel-merged")
     return out
 

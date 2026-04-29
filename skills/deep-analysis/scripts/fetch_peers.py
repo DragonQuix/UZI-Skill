@@ -111,6 +111,79 @@ def _enrich_peers_with_lixinger(peer_codes: list[str], market: str) -> dict | No
     return out if out else None
 
 
+def _enrich_peers_insurance(peer_codes: list[str], ti_code: str) -> dict:
+    """保险公司专用 · 逐只查询保费/EV/NBV/偿付能力（理杏仁 insurance 端点）。
+
+    Returns:
+        {code: {"premium_income": ..., "ev": ..., "nbv": ..., "roe": ..., "pev": ..., "coresr": ...}, ...}
+    """
+    try:
+        from lib.lixinger_client import fetch_insurance_fs, fetch_insurance_fundamental
+    except ImportError:
+        return {}
+    from lib.lixinger_client import to_float, latest as lx_latest
+
+    # 从 INDUSTRY_PEERS 字典获取名称
+    from lib.industry_peers import INDUSTRY_PEERS
+    name_lookup: dict[str, str] = {}
+    for ind_name, peers in INDUSTRY_PEERS.items():
+        for pc, pn in peers:
+            name_lookup[pc] = pn
+
+    out: dict = {}
+    for code in set(peer_codes):
+        entry: dict = {"name": name_lookup.get(code, code)}
+        fs = fetch_insurance_fs(code, "cn")
+        if fs and fs.get("metrics"):
+            m = fs["metrics"]
+            def _v(*keys):
+                for k in keys:
+                    vals = m.get(k, [])
+                    v = lx_latest(vals)
+                    if v is not None:
+                        return v
+                return None
+            pi = _v("y.ps.ir.t", "y.ps.oi.t")
+            ev = _v("y.bs.ev.t")
+            nbv = _v("y.ps.nbv.t")
+            roe = _v("y.m.wroe.t")
+            np_ = _v("y.ps.npatoshopc.t")
+            pe_val = _v("y.bs.pe_ttm.t")
+            pb_val = _v("y.bs.pb.t")
+            mc_val = _v("y.bs.mc.t")
+            coresr = _v("y.bs.coresr.t")
+            compsr = _v("y.bs.compsr.t")
+            if pi is not None:
+                entry["premium_income_yi"] = round(pi / 1e8, 1)
+            if ev is not None:
+                entry["ev_yi"] = round(ev / 1e8, 1)
+            if nbv is not None:
+                entry["nbv_yi"] = round(nbv / 1e8, 2)
+            if roe is not None:
+                entry["roe"] = round(roe * 100, 1) if abs(roe) < 1 else round(roe, 1)
+            if np_ is not None:
+                entry["np_yi"] = round(np_ / 1e8, 1)
+            if pe_val is not None:
+                entry["pe"] = round(pe_val, 1)
+            if pb_val is not None:
+                entry["pb"] = round(pb_val, 2)
+            if mc_val is not None:
+                entry["mcap_yi"] = round(mc_val / 1e8, 1)
+            if coresr is not None:
+                entry["coresr"] = round(coresr * 100, 1) if coresr < 10 else round(coresr, 1)
+            if compsr is not None:
+                entry["compsr"] = round(compsr * 100, 1) if compsr < 10 else round(compsr, 1)
+
+        # PEV from fundamental endpoint
+        fund = fetch_insurance_fundamental(code, "cn")
+        if fund and fund.get("pev") is not None:
+            entry["pev"] = round(fund["pev"], 2)
+
+        if entry:
+            out[code] = entry
+    return out
+
+
 def main(ticker: str) -> dict:
     ti = parse_ticker(ticker)
     basic = ds.fetch_basic(ti)
@@ -188,9 +261,15 @@ def main(ticker: str) -> dict:
                 source_used += " + INDUSTRY_PEERS_fallback"
 
         if peer_codes:
-            lx_peers = _enrich_peers_with_lixinger(peer_codes, "cn") or {}
-            if lx_peers:
-                source_used += " + lixinger:peers"
+            from lib.lixinger_client import is_financial_industry
+            if is_financial_industry(industry):
+                lx_peers = _enrich_peers_insurance(peer_codes, ti.code) or {}
+                if lx_peers:
+                    source_used += " + lixinger:insurance_peers"
+            else:
+                lx_peers = _enrich_peers_with_lixinger(peer_codes, "cn") or {}
+                if lx_peers:
+                    source_used += " + lixinger:peers"
 
     if industry or lx_peers:
         # Try akshare for name list; fall back to lx_peers keys
@@ -235,6 +314,7 @@ def main(ticker: str) -> dict:
         all_codes.sort(key=lambda x: x[2].get("mcap_yi", 0), reverse=True)
         all_codes = all_codes[:20]
 
+        is_ins = is_financial_industry(industry)
         for code, name, lx in all_codes:
             pe_val = lx.get("pe") or _float({})
             pb_val = lx.get("pb") or 0.0
@@ -254,6 +334,23 @@ def main(ticker: str) -> dict:
                 entry["dyr"] = "{:.2f}%".format(dyr_val)
             if ps_val is not None:
                 entry["ps"] = "{:.1f}".format(ps_val)
+            # v2.17 · 保险业特有字段
+            if is_ins:
+                pi = lx.get("premium_income_yi")
+                ev_yi = lx.get("ev_yi")
+                nbv_yi = lx.get("nbv_yi")
+                pev = lx.get("pev")
+                csr = lx.get("coresr")
+                if pi is not None:
+                    entry["premium_income"] = f"{pi:.0f}亿"
+                if ev_yi is not None:
+                    entry["ev"] = f"{ev_yi:.0f}亿"
+                if nbv_yi is not None:
+                    entry["nbv"] = f"{nbv_yi:.0f}亿"
+                if pev is not None:
+                    entry["pev"] = f"{pev:.2f}x"
+                if csr is not None:
+                    entry["coresr"] = f"{csr:.0f}%"
             entry["_mcap"] = mcap_val
 
             if code == ti.code:

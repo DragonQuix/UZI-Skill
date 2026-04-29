@@ -732,3 +732,117 @@ def _do_block_deal_fetch(endpoint: str, body: dict) -> list[dict]:
             "discountRate": r.get("discountRate"),
         })
     return out
+
+
+# ═══════════════════════════════════════════════════════════════
+# v2.17 · 金融业专用端点 (保险/银行/证券)
+# ═══════════════════════════════════════════════════════════════
+
+_FINANCIAL_INDUSTRIES = frozenset({"保险", "银行", "证券", "多元金融"})
+
+
+def is_financial_industry(industry: str) -> bool:
+    """判断行业是否为金融业（应走 /fs/insurance|bank|security 端点）。"""
+    return industry in _FINANCIAL_INDUSTRIES
+
+
+# 保险业财报核心指标 — 覆盖成本结构、投资端、偿付能力
+_INSURANCE_FS_METRICS = [
+    # 保费与收入
+    "y.ps.pi.t",               # 保险业务收入 (保费)
+    "y.ps.ep.t",               # 已赚保费
+    "y.ps.ir.t",               # 保险服务收入
+    "y.ps.oi.t",               # 营业收入
+    # 赔付与退保
+    "y.ps.ce.t",               # 保险合同赔付支出
+    "y.ps.s.t",                # 退保金
+    # 费用
+    "y.ps.faceoio.t",          # 保险业务手续费及佣金支出
+    "y.ps.baae.t",             # 业务及管理费
+    "y.ps.ise.t",              # 保险服务费用
+    # 准备金
+    "y.ps.iiicr.t",            # 提取保险责任准备金净额
+    "y.ps.iifefici.t",         # 承保财务损益
+    # 投资
+    "y.ps.ivi.t",              # 投资收益
+    "y.ps.ciofv.t",            # 公允价值变动收益
+    "y.bs.ta.t",               # 资产总计 (保险公司总资产≈投资资产)
+    # 利润
+    "y.ps.npatoshopc.t",       # 归母净利润
+    "y.ps.op.t",               # 营业利润
+    "y.ps.da.t",               # 分红金额
+    "y.ps.d_np_r.t",           # 分红率
+    # 内含价值 / NBV
+    "y.ps.nbv.t",              # 新业务价值
+    "y.bs.ev.t",               # 内含价值
+    # 偿付能力
+    "y.bs.coresr.t",           # 核心偿付能力充足率
+    "y.bs.compsr.t",           # 综合偿付能力充足率
+    # 估值
+    "y.bs.pe_ttm.t",           # PE-TTM
+    "y.bs.pb.t",               # PB
+    "y.bs.mc.t",               # 市值
+    "y.bs.tl_ta_r.t",          # 资产负债率
+    # 盈利指标
+    "y.m.wroe.t",              # 加权ROE
+    "y.m.np_s_r.t",            # 净利润率
+    "y.m.roa.t",               # ROA
+]
+
+
+def fetch_insurance_fs(stock_code: str, market: str = "cn") -> dict | None:
+    """获取保险业专用财报指标 (保费/赔付/EV/NBV/偿付能力)。
+
+    调用 /api/{market}/company/fs/insurance 端点。
+    返回 shape 同 fetch_financials(): {"metrics": {...}, "dates": [...], "_raw": [...]}
+    """
+    token = _token()
+    endpoint = f"{LIXINGER_BASE}/{market}/company/fs/insurance"
+    body = {
+        "token": token,
+        "stockCodes": [stock_code],
+        "date": "latest",
+        "metricsList": _INSURANCE_FS_METRICS,
+    }
+    cache_key = f"insurance_fs__{market}__{stock_code}"
+    return _cached(cache_key, lambda: _do_fetch(endpoint, body), ttl=24 * 60 * 60)
+
+
+# 保险业基本面指标 — PEV 等
+_INSURANCE_FUNDAMENTAL_METRICS = [
+    "pev", "pe_ttm", "pb", "dyr", "mc", "sp", "spc",
+]
+
+
+def fetch_insurance_fundamental(stock_code: str, market: str = "cn") -> dict | None:
+    """获取保险业基本面数据 (PEV 等估值指标)。
+
+    调用 /api/{market}/company/fundamental/insurance 端点。
+    返回扁平 dict: {"pev": 0.68, "pe_ttm": 5.4, ...}
+    """
+    token = _token()
+    endpoint = f"{LIXINGER_BASE}/{market}/company/fundamental/insurance"
+    body = {
+        "token": token,
+        "stockCodes": [stock_code],
+        "date": "latest",
+        "metricsList": _INSURANCE_FUNDAMENTAL_METRICS,
+    }
+    cache_key = f"insurance_fund__{market}__{stock_code}"
+
+    def _fetch():
+        rows = _do_simple_fetch(endpoint, body)
+        if not rows:
+            return None
+        out: dict = {}
+        for r in rows:
+            for k, v in r.items():
+                if k in ("stockCode", "date"):
+                    continue
+                try:
+                    out[k] = float(v) if v is not None else None
+                except (ValueError, TypeError):
+                    out[k] = v
+        return out if out else None
+
+    return _cached(cache_key, _fetch, ttl=24 * 60 * 60)

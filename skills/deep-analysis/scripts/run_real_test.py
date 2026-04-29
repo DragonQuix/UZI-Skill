@@ -44,7 +44,7 @@ FETCHER_MAP = [
     ("fetch_research",        "6_research",     lambda t, r: (t,)),
     ("fetch_industry",        "7_industry",     lambda t, r: (r.get("0_basic", {}).get("data", {}).get("industry", "") or "综合",)),
     ("fetch_materials",       "8_materials",    lambda t, r: (t,)),
-    ("fetch_futures",         "9_futures",      lambda t, r: (r.get("0_basic", {}).get("data", {}).get("industry", "") or "综合",)),
+    ("fetch_futures",         "9_futures",      lambda t, r: (t, r.get("0_basic", {}).get("data", {}).get("industry", "") or "综合")),
     ("fetch_valuation",       "10_valuation",   lambda t, r: (t,)),
     ("fetch_governance",      "11_governance",  lambda t, r: (t,)),
     ("fetch_capital_flow",    "12_capital_flow",lambda t, r: (t,)),
