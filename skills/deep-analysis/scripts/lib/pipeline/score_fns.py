@@ -148,8 +148,26 @@ def score_dimensions(raw: dict) -> dict:
                          "reasons_pass": [f"覆盖券商 {coverage} 家"] if coverage >= 10 else [],
                          "reasons_fail": [] if coverage else ["缺乏覆盖"]}
 
-    # 7 · 行业景气 (stub heavy qualitative)
-    out["7_industry"] = {"score": 7, "weight": 4, "label": "行业处于成长期（需 web search 确认）"}
+    # 7 · 行业景气 — v3.9 · 从 raw data lifecycle 动态生成 label + score
+    industry_data = _get("7_industry")
+    lifecycle = (industry_data.get("lifecycle") or "").strip()
+    growth = (industry_data.get("growth") or "").strip()
+    note = (industry_data.get("note") or "").strip()
+
+    if lifecycle:
+        label_parts = [f"行业{lifecycle}"]
+        if growth:
+            label_parts.append(f"增速{growth}")
+        if note:
+            label_parts.append(note)
+        label = " · ".join(label_parts)
+
+        _lifecycle_score = {"导入期": 6, "成长期": 8, "增长期": 8, "成熟期": 5, "衰退期": 3}
+        score_7 = _lifecycle_score.get(lifecycle, 7)
+    else:
+        score_7 = 7
+        label = "行业景气度需定性评估"
+    out["7_industry"] = {"score": score_7, "weight": 4, "label": label}
 
     # 8 · 原材料
     out["8_materials"] = {"score": 6, "weight": 3, "label": "原材料成本数据需 web search"}

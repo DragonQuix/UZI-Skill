@@ -11,6 +11,7 @@ import time
 import akshare as ak  # type: ignore
 from lib import data_sources as ds
 from lib.market_router import parse_ticker
+from lib.lixinger_client import is_financial_industry
 
 
 def _float(v, default=0.0):
@@ -261,7 +262,6 @@ def main(ticker: str) -> dict:
                 source_used += " + INDUSTRY_PEERS_fallback"
 
         if peer_codes:
-            from lib.lixinger_client import is_financial_industry
             if is_financial_industry(industry):
                 lx_peers = _enrich_peers_insurance(peer_codes, ti.code) or {}
                 if lx_peers:
