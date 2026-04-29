@@ -239,27 +239,33 @@ def main(ticker: str) -> dict:
             "fallback": False,
         }
 
-    # v3.0 · A 股 · 理杏仁批量指标优先，akshare 兜底
+    # v3.10 · INDUSTRY_PEERS 主源优先，akshare API 兜底
+    # 旧版先用 akshare 再用 INDUSTRY_PEERS fallback；v3.10 调序。
+    # 本地字典更稳定（不依赖东财板块 API 列名格式），且分类体系已统一为
+    # sw_2021 最深层级。get_peer_codes() 内部通过 resolve_industry_name 做三级匹配。
     fallback_used = False
     fallback_reason = ""
-    source_used = "akshare:stock_board_industry_cons_em"
-
-    # Fallback via shared INDUSTRY_PEERS in lib/industry_peers.py (34 industries)
+    source_used = "INDUSTRY_PEERS"
 
     lx_peers: dict = {}
     if industry and _lixinger_available():
         peer_codes: list[str] = []
-        try:
-            df = ak.stock_board_industry_cons_em(symbol=industry)
-            if df is not None and not df.empty:
-                peer_codes = [str(c).zfill(6) for c in df["代码"].tolist()]
-        except Exception:
-            pass
 
+        # 1. 主源: 本地字典（resolve_industry_name 精确→别名→包含）
+        peer_codes = get_peer_codes(industry)
+
+        # 2. 兜底: akshare 东方财富板块 API
         if not peer_codes:
-            peer_codes = get_peer_codes(industry)
-            if peer_codes:
-                source_used += " + INDUSTRY_PEERS_fallback"
+            source_used = "akshare:stock_board_industry_cons_em"
+            try:
+                df = ak.stock_board_industry_cons_em(symbol=industry)
+                if df is not None and not df.empty:
+                    peer_codes = [str(c).zfill(6) for c in df["代码"].tolist()]
+            except Exception:
+                pass
+            if not peer_codes:
+                fallback_used = True
+                fallback_reason = f"INDUSTRY_PEERS + akshare 均未命中 '{industry}'"
 
         if peer_codes:
             if is_financial_industry(industry):

@@ -101,6 +101,32 @@ def list_all_stocks(market: str) -> list[tuple[str, str]]:
 
 
 # ═══════════════════════════════════════════════════════════════
+# 行业分类提取 · 与 fetch_industries() 同款优先级
+# ═══════════════════════════════════════════════════════════════
+
+def _extract_best_industry(rows: list[dict]) -> str | None:
+    """从理杏仁 industries 接口返回的平铺行中提取最佳行业分类名。
+
+    复用 fetch_industries() 同款优先级：
+      sw_2021 最深 > sw 最深 > cni 三级 > 兜底 first name
+
+    v3.10 · 修复 build_industry_peers 缓存一致性：
+      旧版缓存命中时取 rows[0].get("name")（通常是 cni 一级，如"饮料"），
+      未命中时走 fetch_industries()（返回 sw_2021 最深，如"白酒"），
+      导致字典 key 混合了两种分类体系。现在缓存命中/未命中走同一条路径。
+    """
+    names = [((r or {}).get("source", ""), (r or {}).get("name", "")) for r in rows]
+    for preferred_src in ("sw_2021", "sw"):
+        src_names = [name for src, name in names if src == preferred_src and name]
+        if src_names:
+            return src_names[-1]  # 取最深层级
+    cni_names = [name for src, name in names if src == "cni" and name]
+    if len(cni_names) >= 3:
+        return cni_names[2]  # cni 三级
+    return names[0][1] if names else None
+
+
+# ═══════════════════════════════════════════════════════════════
 # Step 2 · 并行查询行业 (带速率控制)
 # ═══════════════════════════════════════════════════════════════
 
@@ -133,7 +159,7 @@ def build_industry_map(stocks: list[tuple[str, str]], market: str,
                 if age < 7 * 24 * 60 * 60:
                     rows = cached.get("data", [])
                     if rows and isinstance(rows[0], dict):
-                        cached_results[code] = (rows[0] or {}).get("name")
+                        cached_results[code] = _extract_best_industry(rows)
                     else:
                         cached_results[code] = None  # API 曾返回空
                     hit = True
@@ -230,19 +256,91 @@ def render_py(industry_map: dict[str, list[tuple[str, str]]]) -> str:
 
     lines.append("}")
     lines.append("")
-    lines.append("")
-    lines.append("def get_peer_codes(industry: str) -> list[str]:")
-    lines.append('    """为指定行业返回纯股票代码列表（用于 fetch_peers fallback）。"""')
-    lines.append("    peers = INDUSTRY_PEERS.get(industry)")
-    lines.append("    if not peers:")
-    lines.append("        return []")
-    lines.append("    return [code for code, _ in peers]")
-    lines.append("")
-    lines.append("")
-    lines.append("def get_peer_codes_with_names(industry: str) -> list[tuple[str, str]]:")
-    lines.append('    """为指定行业返回 (代码, 名称) 元组列表（用于 fetch_similar_stocks）。"""')
-    lines.append("    return INDUSTRY_PEERS.get(industry, [])")
-    lines.append("")
+    # v3.10 · 内置别名表 + resolve_industry_name + 增强版 get_peer_codes
+    lines.extend([
+        "",
+        "# ═══════════════════════════════════════════════════════════════",
+        "# 行业别名映射 · v3.10 集中管理（由 build_industry_peers.py 自动生成骨架）",
+        "# ═══════════════════════════════════════════════════════════════",
+        "",
+        "_INDUSTRY_ALIASES: dict[str, str] = {",
+        '    # 请手动维护此表。重建字典不会覆盖别名表。',
+        "}",
+        "",
+        "",
+        "def resolve_industry_name(industry: str, aggregate_siblings: bool = False):",
+        '    """将任意来源的行业名解析为 INDUSTRY_PEERS 的有效 key(s)。',
+        "",
+        "    匹配优先级：1. 精确命中 → 2. 别名映射 → 3. 包含匹配",
+        '    """',
+        "    if not industry or not isinstance(industry, str) or len(industry.strip()) < 2:",
+        "        return None",
+        "    industry = industry.strip()",
+        "    # 1. 精确命中",
+        "    if industry in INDUSTRY_PEERS:",
+        "        return [industry] if aggregate_siblings else industry",
+        "    # 2. 别名映射",
+        "    alias = _INDUSTRY_ALIASES.get(industry)",
+        "    if alias and alias in INDUSTRY_PEERS:",
+        "        return [alias] if aggregate_siblings else alias",
+        "    # 3. 包含匹配",
+        "    candidates = []",
+        "    for key in INDUSTRY_PEERS:",
+        "        if len(industry) >= 2 and len(key) >= 2:",
+        "            if industry in key or key in industry:",
+        "                candidates.append(key)",
+        "    if not candidates:",
+        "        prefix = industry[:3] if len(industry) >= 3 else industry[:2]",
+        "        for key in INDUSTRY_PEERS:",
+        "            if key.startswith(prefix) or prefix in key:",
+        "                candidates.append(key)",
+        "                if len(candidates) >= 5:",
+        "                    break",
+        "    if aggregate_siblings:",
+        "        return candidates if candidates else None",
+        "    return candidates[0] if candidates else None",
+        "",
+        "",
+        "def get_peer_codes(industry: str) -> list[str]:",
+        '    """为指定行业返回纯股票代码列表。',
+        "",
+        '    v3.10 · 通过 resolve_industry_name 做三级匹配（精确→别名→包含）。',
+        '    """',
+        "    resolved = resolve_industry_name(industry)",
+        "    if not resolved:",
+        "        return []",
+        "    if isinstance(resolved, list):",
+        "        codes: list[str] = []",
+        "        seen: set[str] = set()",
+        "        for key in resolved:",
+        "            for code, _ in INDUSTRY_PEERS.get(key, []):",
+        "                if code not in seen:",
+        "                    codes.append(code)",
+        "                    seen.add(code)",
+        "        return codes",
+        "    return [code for code, _ in INDUSTRY_PEERS.get(resolved, [])]",
+        "",
+        "",
+        "def get_peer_codes_with_names(industry: str) -> list[tuple[str, str]]:",
+        '    """为指定行业返回 (代码, 名称) 元组列表。',
+        "",
+        '    v3.10 · 通过 resolve_industry_name 做三级匹配。',
+        '    """',
+        "    resolved = resolve_industry_name(industry)",
+        "    if not resolved:",
+        "        return []",
+        "    if isinstance(resolved, list):",
+        "        result: list[tuple[str, str]] = []",
+        "        seen: set[str] = set()",
+        "        for key in resolved:",
+        "            for code, name in INDUSTRY_PEERS.get(key, []):",
+        "                if code not in seen:",
+        "                    result.append((code, name))",
+        "                    seen.add(code)",
+        "        return result",
+        "    return INDUSTRY_PEERS.get(resolved, [])",
+        "",
+    ])
 
     return "\n".join(lines)
 

@@ -756,12 +756,20 @@ def _do_block_deal_fetch(endpoint: str, body: dict) -> list[dict]:
 # v2.17 · 金融业专用端点 (保险/银行/证券)
 # ═══════════════════════════════════════════════════════════════
 
-_FINANCIAL_INDUSTRIES = frozenset({"保险", "银行", "证券", "多元金融"})
+# v3.10 · 金融子串匹配（sw_2021 细粒度分类如 "股份制银行"/"国有大型银行"）
+_FINANCIAL_KEYWORDS = frozenset({"保险", "银行", "证券", "金融"})
 
 
 def is_financial_industry(industry: str) -> bool:
-    """判断行业是否为金融业（应走 /fs/insurance|bank|security 端点）。"""
-    return industry in _FINANCIAL_INDUSTRIES
+    """判断行业是否为金融业（应走 /fs/insurance|bank|security 端点）。
+
+    v3.10 · 从精确匹配改为子串匹配，兼容 sw_2021 细粒度分类：
+      旧版 "银行" → 新版 "国有大型银行"/"股份制银行"/"城商行"/"农商行"
+      旧版 "多元金融" → 新版 "金融控股"/"其他多元金融"/"期货"
+    """
+    if not industry:
+        return False
+    return any(kw in industry for kw in _FINANCIAL_KEYWORDS)
 
 
 # 保险业财报核心指标 — 覆盖成本结构、投资端、偿付能力

@@ -16,7 +16,7 @@ from lib import data_sources as ds
 from lib.market_router import parse_ticker
 
 
-from lib.industry_peers import INDUSTRY_PEERS
+from lib.industry_peers import INDUSTRY_PEERS, get_peer_codes_with_names
 
 
 def _fetch_peer_basics(peers: list[tuple[str, str]], self_code: str, top_n: int) -> list[dict]:
@@ -140,19 +140,14 @@ def main(ticker: str, top_n: int = 4) -> dict:
         "光模块": "通信设备",
     }
 
-    # 1. 精确匹配
-    peers = INDUSTRY_PEERS.get(industry, [])
-    # 2. 别名映射
+    # v3.10 · 通过 get_peer_codes_with_names() 做集中解析（精确→别名→包含）
+    # 替代旧版分散在 fetch_similar_stocks 的 _INDUSTRY_ALIASES + 手写模糊匹配
+    peers = get_peer_codes_with_names(industry)
+    # 2. 本地别名兜底（表中未覆盖的特殊映射）
     if not peers:
         alias = _INDUSTRY_ALIASES.get(industry)
         if alias:
-            peers = INDUSTRY_PEERS.get(alias, [])
-    # 3. 子串模糊匹配
-    if not peers:
-        for key, val in INDUSTRY_PEERS.items():
-            if len(industry) >= 2 and (key in industry or industry in key or industry[:2] in key):
-                peers = val
-                break
+            peers = get_peer_codes_with_names(alias)
 
     if not peers:
         return {
