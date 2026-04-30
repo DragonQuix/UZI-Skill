@@ -75,10 +75,14 @@ def _lixinger_available() -> bool:
     return bool(os.environ.get("LIXINGER_TOKEN", "").strip())
 
 
-def _fetch_valuation_via_lixinger(ti, current_pe=None, current_pb=None) -> dict | None:
+def _fetch_valuation_via_lixinger(ti, current_pe=None, current_pb=None,
+                                  industry: str = "") -> dict | None:
     try:
         from lib.lixinger_client import (
+            classify_financial_industry,
             fetch_valuation_history as lx_valhist,
+            fetch_bank_fs, fetch_security_fs, fetch_insurance_fs,
+            fetch_other_financial_fs,
             to_float as lx_tof,
         )
     except ImportError:
@@ -86,7 +90,19 @@ def _fetch_valuation_via_lixinger(ti, current_pe=None, current_pb=None) -> dict 
 
     market = "hk" if ti.market == "H" else "cn"
     code = ti.code.zfill(5) if market == "hk" else ti.code
-    raw = lx_valhist(code, market=market, years_back=5)
+
+    # v3.11 · 按金融子类型路由到正确的 fs 端点（估值分位数据同样来自 fs 端点）
+    ftype = classify_financial_industry(industry) if industry else None
+    if ftype == "bank":
+        raw = fetch_bank_fs(code, market=market, start_year=2021, end_year=2026)
+    elif ftype == "security":
+        raw = fetch_security_fs(code, market=market, start_year=2021, end_year=2026)
+    elif ftype == "insurance":
+        raw = fetch_insurance_fs(code, market=market, start_year=2021, end_year=2026)
+    elif ftype == "other_financial":
+        raw = fetch_other_financial_fs(code, market=market, start_year=2021, end_year=2026)
+    else:
+        raw = lx_valhist(code, market=market, years_back=5)
     if not raw or not raw.get("metrics"):
         return None
 
@@ -102,14 +118,23 @@ def _fetch_valuation_via_lixinger(ti, current_pe=None, current_pb=None) -> dict 
         return [v for v in result if v is not None]
 
     # HK API 仅支持 y.* 年报粒度，A 股用 q.* 季度粒度
+    # v3.11 · 金融业端点(bank/security/insurance/other_financial)返回 y.*
+    # 若 q.* 不存在则 fallback 到 y.*
     pfx = "y" if market == "hk" else "q"
-    pe_hist = _series(f"{pfx}.bs.pe_ttm.t")
-    pb_hist = _series(f"{pfx}.bs.pb.t")
-    ps_hist = _series(f"{pfx}.bs.ps_ttm.t")
-    pcf_hist = _series(f"{pfx}.bs.pcf_ttm.t")     # HK 无此字段，返回空
-    dyr_hist = _series(f"{pfx}.bs.dyr.t")          # HK 无此字段，返回空
-    mcap_hist = _series(f"{pfx}.bs.mc.t")
-    shn_hist = _series(f"{pfx}.bs.shn.t")           # HK 无此字段，返回空
+    def _try_series(*keys):
+        for k in keys:
+            vals = _series(k)
+            if vals:
+                return vals
+        return []
+
+    pe_hist = _try_series(f"{pfx}.bs.pe_ttm.t", "y.bs.pe_ttm.t")
+    pb_hist = _try_series(f"{pfx}.bs.pb.t", "y.bs.pb.t")
+    ps_hist = _try_series(f"{pfx}.bs.ps_ttm.t", "y.bs.ps_ttm.t")
+    pcf_hist = _try_series(f"{pfx}.bs.pcf_ttm.t")
+    dyr_hist = _try_series(f"{pfx}.bs.dyr.t", "y.bs.dyr.t")
+    mcap_hist = _try_series(f"{pfx}.bs.mc.t", "y.bs.mc.t")
+    shn_hist = _try_series(f"{pfx}.bs.shn.t")
 
     out: dict = {}
 
@@ -262,9 +287,20 @@ def main(ticker: str) -> dict:
     val_source = ""
 
     if _lixinger_available():
-        val_data = _fetch_valuation_via_lixinger(ti, current_pe=cur_pe, current_pb=cur_pb) or {}
+        val_data = _fetch_valuation_via_lixinger(
+            ti, current_pe=cur_pe, current_pb=cur_pb,
+            industry=basic.get("industry", ""),
+        ) or {}
         if val_data.get("_valuation_source") == "lixinger":
-            val_source = "lixinger:valuation_history"
+            # v3.11 · source label 反映实际端点类型
+            industry = basic.get("industry", "")
+            ftype = ""
+            try:
+                from lib.lixinger_client import classify_financial_industry
+                ftype = classify_financial_industry(industry) or ""
+            except Exception:
+                pass
+            val_source = f"lixinger:{ftype}_valuation" if ftype else "lixinger:valuation_history"
         else:
             val_data = _fetch_valuation_legacy(ti, basic)
             val_source = "baidu:fallback"

@@ -234,9 +234,10 @@ def main(ticker_or_industry: str) -> dict:
         except Exception:
             pass
 
-    # v2.17 · 金融业重定向 — 保险公司无传统原材料，走理杏仁成本结构分析
-    from lib.lixinger_client import is_financial_industry
-    if is_financial_industry(industry):
+    # v3.11 · 仅保险公司走理杏仁成本结构分析（赔付/费用/保费）
+    # 银行/证券/其他金融无传统原材料框架，跳过
+    from lib.lixinger_client import classify_financial_industry
+    if classify_financial_industry(industry) == "insurance":
         return _build_insurance_cost_structure(ticker_or_industry)
 
     materials = INDUSTRY_MATERIALS.get(industry, [])

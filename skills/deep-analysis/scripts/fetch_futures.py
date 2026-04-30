@@ -154,9 +154,10 @@ def _not_applicable_futures_result(industry: str) -> dict:
 
 
 def main(ticker: str = "", industry: str = "") -> dict:
-    # v2.17 · 金融业重定向 — 保险公司无商品期货套保，走理杏仁投资端分析
-    from lib.lixinger_client import is_financial_industry
-    if ticker and is_financial_industry(industry):
+    # v3.11 · 仅保险公司走理杏仁投资端分析（保费/EV/NBV/偿付能力）
+    # 银行/证券/其他金融无"期货对冲"概念，返回 N/A
+    from lib.lixinger_client import classify_financial_industry
+    if ticker and classify_financial_industry(industry) == "insurance":
         return _build_insurance_investment_profile(ticker)
 
     # 兼容旧调用: main(industry) 仅传行业名

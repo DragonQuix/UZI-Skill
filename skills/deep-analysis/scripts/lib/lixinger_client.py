@@ -757,11 +757,26 @@ def _do_block_deal_fetch(endpoint: str, body: dict) -> list[dict]:
 # ═══════════════════════════════════════════════════════════════
 
 # v3.10 · 金融子串匹配（sw_2021 细粒度分类如 "股份制银行"/"国有大型银行"）
-_FINANCIAL_KEYWORDS = frozenset({"保险", "银行", "证券", "金融"})
+_FINANCIAL_KEYWORDS = frozenset({"保险", "银行", "城商行", "农商行", "证券", "期货", "信托", "租赁", "AMC", "金融"})
+
+# v3.11 · 金融子类型 → 理杏仁端点后缀（fs 和 fundamental 共用）
+# 匹配顺序: 保险 > 银行 > 证券 > 期货/信托/租赁/AMC > 金融(兜底)
+_FINANCIAL_TYPE_MAP: list[tuple[str, str]] = [
+    ("保险", "insurance"),
+    ("城商行", "bank"),            # sw_2021: 城市商业银行
+    ("农商行", "bank"),            # sw_2021: 农村商业银行
+    ("银行", "bank"),
+    ("证券", "security"),
+    ("期货", "other_financial"),
+    ("信托", "other_financial"),
+    ("租赁", "other_financial"),
+    ("AMC", "other_financial"),
+    ("金融", "other_financial"),     # 兜底: 金融控股/金融信息服务/多元金融
+]
 
 
 def is_financial_industry(industry: str) -> bool:
-    """判断行业是否为金融业（应走 /fs/insurance|bank|security 端点）。
+    """判断行业是否为金融业（应走专用 fs 端点而非 non_financial）。
 
     v3.10 · 从精确匹配改为子串匹配，兼容 sw_2021 细粒度分类：
       旧版 "银行" → 新版 "国有大型银行"/"股份制银行"/"城商行"/"农商行"
@@ -770,6 +785,23 @@ def is_financial_industry(industry: str) -> bool:
     if not industry:
         return False
     return any(kw in industry for kw in _FINANCIAL_KEYWORDS)
+
+
+def classify_financial_industry(industry: str) -> str | None:
+    """返回理杏仁端点后缀: 'bank'|'security'|'insurance'|'other_financial'。
+
+    非金融行业返回 None。
+    匹配按 _FINANCIAL_TYPE_MAP 顺序，第一个子串命中即返回。
+
+    v3.11 · 替代 is_financial_industry() 的布尔返回，
+    让调用方可根据金融子类型路由到正确的理杏仁端点。
+    """
+    if not industry:
+        return None
+    for keyword, ftype in _FINANCIAL_TYPE_MAP:
+        if keyword in industry:
+            return ftype
+    return None
 
 
 # 保险业财报核心指标 — 覆盖成本结构、投资端、偿付能力
@@ -872,3 +904,153 @@ def fetch_insurance_fundamental(stock_code: str, market: str = "cn") -> dict | N
         return out if out else None
 
     return _cached(cache_key, _fetch, ttl=24 * 60 * 60)
+
+
+# ═══════════════════════════════════════════════════════════════
+# v3.11 · 银行 / 证券 / 其他金融端点
+# ═══════════════════════════════════════════════════════════════
+
+# 银行财报核心指标 — 净息差/不良/拨备/资本充足率
+_BANK_FS_METRICS = [
+    # y.bs.te.t (股东权益) 不在 bank fs 端点支持列表中
+    "y.ps.oi.t",               # 营业收入
+    "y.ps.npatoshopc.t",       # 归母净利润
+    "y.ps.op.t",               # 营业利润
+    "y.ps.da.t",               # 分红金额
+    "y.ps.d_np_r.t",           # 分红率
+    "y.bs.ta.t",               # 资产总计
+    "y.bs.tl_ta_r.t",          # 资产负债率
+    "y.bs.mc.t",               # 市值
+    "y.bs.pe_ttm.t",           # PE-TTM（估值分位用）
+    "y.bs.pb.t",               # PB（估值分位用）
+    "y.m.wroe.t",              # 加权ROE
+    "y.m.np_s_r.t",            # 净利润率
+    "y.m.roa.t",               # ROA
+]
+
+# 证券财报核心指标
+_SECURITY_FS_METRICS = [
+    # y.bs.te.t (股东权益) 不在 security fs 端点支持列表中
+    "y.ps.oi.t",               # 营业收入
+    "y.ps.npatoshopc.t",       # 归母净利润
+    "y.ps.op.t",               # 营业利润
+    "y.ps.da.t",               # 分红金额
+    "y.ps.d_np_r.t",           # 分红率
+    "y.bs.ta.t",               # 资产总计
+    "y.bs.tl_ta_r.t",          # 资产负债率
+    "y.bs.mc.t",               # 市值
+    "y.bs.pe_ttm.t",           # PE-TTM（估值分位用）
+    "y.bs.pb.t",               # PB（估值分位用）
+    "y.m.wroe.t",              # 加权ROE
+    "y.m.np_s_r.t",            # 净利润率
+    "y.m.roa.t",               # ROA
+]
+
+# 其他金融（信托/租赁/AMC/期货/金融控股）核心指标
+_OTHER_FINANCIAL_FS_METRICS = [
+    "y.ps.oi.t",               # 营业收入
+    "y.ps.npatoshopc.t",       # 归母净利润
+    "y.ps.op.t",               # 营业利润
+    "y.ps.da.t",               # 分红金额
+    "y.ps.d_np_r.t",           # 分红率
+    "y.bs.ta.t",               # 资产总计
+    "y.bs.tl_ta_r.t",          # 资产负债率
+    "y.bs.mc.t",               # 市值
+    "y.bs.pe_ttm.t",           # PE-TTM（估值分位用）
+    "y.bs.pb.t",               # PB（估值分位用）
+    "y.m.wroe.t",              # 加权ROE
+    "y.m.np_s_r.t",            # 净利润率
+    "y.m.roa.t",               # ROA
+]
+
+
+def _fetch_financial_fs(stock_code: str, market: str, ftype: str,
+                        start_year: int, end_year: int) -> dict | None:
+    """金融业财报通用获取器 —— 根据 ftype 选择端点和指标集。"""
+    token = _token()
+    endpoint = "{}/{}/company/fs/{}".format(LIXINGER_BASE, market, ftype)
+    start_date = "{}-12-31".format(start_year)
+    end_date = "{}-12-31".format(end_year)
+
+    metrics_map = {
+        "bank": _BANK_FS_METRICS,
+        "security": _SECURITY_FS_METRICS,
+        "other_financial": _OTHER_FINANCIAL_FS_METRICS,
+    }
+    metrics = metrics_map.get(ftype, _OTHER_FINANCIAL_FS_METRICS)
+
+    body = {
+        "token": token,
+        "stockCodes": [stock_code],
+        "startDate": start_date,
+        "endDate": end_date,
+        "metricsList": metrics,
+    }
+    cache_key = "fs_{}__{}__{}__{}_{}".format(ftype, market, stock_code, start_year, end_year)
+    return _cached(cache_key, lambda: _do_fetch(endpoint, body))
+
+
+def fetch_bank_fs(stock_code: str, market: str = "cn",
+                  start_year: int = 2016, end_year: int = 2026) -> dict | None:
+    """银行财报 → /api/{market}/company/fs/bank"""
+    return _fetch_financial_fs(stock_code, market, "bank", start_year, end_year)
+
+
+def fetch_security_fs(stock_code: str, market: str = "cn",
+                      start_year: int = 2016, end_year: int = 2026) -> dict | None:
+    """证券财报 → /api/{market}/company/fs/security"""
+    return _fetch_financial_fs(stock_code, market, "security", start_year, end_year)
+
+
+def fetch_other_financial_fs(stock_code: str, market: str = "cn",
+                             start_year: int = 2016, end_year: int = 2026) -> dict | None:
+    """其他金融财报 → /api/{market}/company/fs/other_financial"""
+    return _fetch_financial_fs(stock_code, market, "other_financial", start_year, end_year)
+
+
+# ── 金融业基本面快照 (fundamental endpoints) ──
+
+def _fetch_financial_fundamental(stock_code: str, market: str, ftype: str) -> dict | None:
+    """金融业基本面通用获取器 —— 返回 PE/PB/PS/股息率/市值等快照。"""
+    token = _token()
+    endpoint = "{}/{}/company/fundamental/{}".format(LIXINGER_BASE, market, ftype)
+    metrics = ["pe_ttm", "pb", "ps_ttm", "dyr", "mc", "sp", "spc", "roe", "roa"]
+    body = {
+        "token": token,
+        "stockCodes": [stock_code],
+        "date": "latest",
+        "metricsList": metrics,
+    }
+    cache_key = "fin_fund__{}__{}__{}".format(ftype, market, stock_code)
+
+    def _fetch():
+        rows = _do_simple_fetch(endpoint, body)
+        if not rows:
+            return None
+        out: dict = {}
+        for r in rows:
+            for k, v in r.items():
+                if k in ("stockCode", "date"):
+                    continue
+                try:
+                    out[k] = float(v) if v is not None else None
+                except (ValueError, TypeError):
+                    out[k] = v
+        return out if out else None
+
+    return _cached(cache_key, _fetch, ttl=24 * 60 * 60)
+
+
+def fetch_bank_fundamental(stock_code: str, market: str = "cn") -> dict | None:
+    """银行基本面快照 → /api/{market}/company/fundamental/bank"""
+    return _fetch_financial_fundamental(stock_code, market, "bank")
+
+
+def fetch_security_fundamental(stock_code: str, market: str = "cn") -> dict | None:
+    """证券基本面快照 → /api/{market}/company/fundamental/security"""
+    return _fetch_financial_fundamental(stock_code, market, "security")
+
+
+def fetch_other_financial_fundamental(stock_code: str, market: str = "cn") -> dict | None:
+    """其他金融基本面快照 → /api/{market}/company/fundamental/other_financial"""
+    return _fetch_financial_fundamental(stock_code, market, "other_financial")

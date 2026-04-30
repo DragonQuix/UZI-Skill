@@ -54,9 +54,12 @@ def _lixinger_available() -> bool:
     return bool(os.environ.get("LIXINGER_TOKEN", "").strip())
 
 
-def _fetch_via_lixinger(ti) -> dict | None:
+def _fetch_via_lixinger(ti, industry: str = "") -> dict | None:
     try:
         from lib.lixinger_client import (
+            classify_financial_industry,
+            fetch_bank_fs, fetch_security_fs, fetch_insurance_fs,
+            fetch_other_financial_fs,
             fetch_financials as lx_fetch,
             to_float as lx_tof,
         )
@@ -65,7 +68,19 @@ def _fetch_via_lixinger(ti) -> dict | None:
 
     market = "hk" if ti.market == "H" else "cn"
     code = ti.code.zfill(5) if market == "hk" else ti.code
-    raw = lx_fetch(code, market=market, start_year=2016, end_year=2026)
+
+    # v3.11 · 按金融子类型路由到正确的 fs 端点
+    ftype = classify_financial_industry(industry) if industry else None
+    if ftype == "bank":
+        raw = fetch_bank_fs(code, market=market, start_year=2016, end_year=2026)
+    elif ftype == "security":
+        raw = fetch_security_fs(code, market=market, start_year=2016, end_year=2026)
+    elif ftype == "insurance":
+        raw = fetch_insurance_fs(code, market=market, start_year=2016, end_year=2026)
+    elif ftype == "other_financial":
+        raw = fetch_other_financial_fs(code, market=market, start_year=2016, end_year=2026)
+    else:
+        raw = lx_fetch(code, market=market, start_year=2016, end_year=2026)
     if not raw or not raw.get("metrics"):
         return None
 
@@ -93,7 +108,8 @@ def _fetch_via_lixinger(ti) -> dict | None:
     rev = _series("y.ps.oi.t", "y.ps.toi.t", div=1e8)
     np_ = _series("y.ps.npatoshopc.t", "y.ps.np.t", div=1e8)
     # API returns ROE as decimal: 0.3253 → 32.53%
-    roe_raw = _series("y.ps.wroe.t", "y.ps.wdroe.t", is_pct=True)
+    # v3.11 · bank/security 端点 ROE 在 y.m.wroe.t, non_financial 在 y.ps.wroe.t
+    roe_raw = _series("y.ps.wroe.t", "y.ps.wdroe.t", "y.m.wroe.t", is_pct=True)
     gpm = _series("y.ps.gp_m.t", is_pct=True)
     # 净利率 = 净利润/营收 (推算, y.m.np_s_r 不可用)
     npm_raw: list[float] = []
@@ -445,12 +461,29 @@ def main(ticker: str) -> dict:
     error = None
     data: dict = {}
 
+    # v3.11 · 获取行业分类以路由正确的理杏仁端点
+    industry = ""
+    try:
+        from lib.data_sources import fetch_basic as _ds_basic
+        basic = _ds_basic(ti) or {}
+        industry = basic.get("industry", "")
+    except Exception:
+        pass
+
+    # v3.11 · 端点后缀（用于 source label）
+    ftype = ""
+    try:
+        from lib.lixinger_client import classify_financial_industry
+        ftype = classify_financial_industry(industry) or ""
+    except Exception:
+        pass
+
     try:
         if ti.market == "A":
             if _lixinger_available():
-                data = _fetch_via_lixinger(ti)
+                data = _fetch_via_lixinger(ti, industry)
                 if data:
-                    source = "lixinger:non_financial"
+                    source = f"lixinger:{ftype}" if ftype else "lixinger:non_financial"
                 else:
                     fallback = True
                     data = _fetch_a_share_legacy(ti)
@@ -461,9 +494,9 @@ def main(ticker: str) -> dict:
 
         elif ti.market == "H":
             if _lixinger_available():
-                data = _fetch_via_lixinger(ti)
+                data = _fetch_via_lixinger(ti, industry)
                 if data:
-                    source = "lixinger:hk_non_financial"
+                    source = f"lixinger:hk_{ftype}" if ftype else "lixinger:hk_non_financial"
                 else:
                     fallback = True
                     data = _fetch_hk_legacy(ti)

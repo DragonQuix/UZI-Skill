@@ -11,7 +11,7 @@ import time
 import akshare as ak  # type: ignore
 from lib import data_sources as ds
 from lib.market_router import parse_ticker
-from lib.lixinger_client import is_financial_industry
+from lib.lixinger_client import is_financial_industry, classify_financial_industry
 
 
 def _float(v, default=0.0):
@@ -268,10 +268,16 @@ def main(ticker: str) -> dict:
                 fallback_reason = f"INDUSTRY_PEERS + akshare 均未命中 '{industry}'"
 
         if peer_codes:
-            if is_financial_industry(industry):
+            # v3.11 · 按金融子类型路由: 保险→保险端点, 其他金融→标准端点
+            ftype = classify_financial_industry(industry) if industry else None
+            if ftype == "insurance":
                 lx_peers = _enrich_peers_insurance(peer_codes, ti.code) or {}
                 if lx_peers:
                     source_used += " + lixinger:insurance_peers"
+            elif ftype in ("bank", "security", "other_financial"):
+                lx_peers = _enrich_peers_with_lixinger(peer_codes, "cn") or {}
+                if lx_peers:
+                    source_used += f" + lixinger:{ftype}_peers"
             else:
                 lx_peers = _enrich_peers_with_lixinger(peer_codes, "cn") or {}
                 if lx_peers:
@@ -320,7 +326,7 @@ def main(ticker: str) -> dict:
         all_codes.sort(key=lambda x: x[2].get("mcap_yi", 0), reverse=True)
         all_codes = all_codes[:20]
 
-        is_ins = is_financial_industry(industry)
+        is_ins = (classify_financial_industry(industry) == "insurance") if industry else False
         for code, name, lx in all_codes:
             pe_val = lx.get("pe") or _float({})
             pb_val = lx.get("pb") or 0.0
