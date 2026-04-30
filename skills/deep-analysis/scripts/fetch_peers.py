@@ -41,17 +41,25 @@ def _lixinger_available() -> bool:
     return bool(os.environ.get("LIXINGER_TOKEN", "").strip())
 
 
-def _enrich_peers_with_lixinger(peer_codes: list[str], market: str) -> dict | None:
+def _enrich_peers_with_lixinger(peer_codes: list[str], market: str,
+                                ftype: str | None = None) -> dict | None:
     """逐只查询同行最新年报指标 (startDate/endDate 模式, 各有 24h 缓存).
 
     理杏仁 date:latest 多股票模式不可靠, 改用 startDate 单股票模式逐个查.
     每个查询 24h 缓存, 首次 ~2s/只, 之后 0s.
+
+    v3.13 · ftype 参数: 金融业 (bank/security/insurance/other_financial)
+    使用正确的金融端点而非 non_financial 端点, 避免数据为空.
     """
     try:
         from lib.lixinger_client import (
-            fetch_financials as lx_fs,
             to_float as lx_tof,
+            fetch_bank_fs,
+            fetch_security_fs,
+            fetch_other_financial_fs,
         )
+        # 非金融仍用通用 non_financial 端点
+        from lib.lixinger_client import fetch_financials as lx_nonfin_fs
     except ImportError:
         return None
 
@@ -60,9 +68,29 @@ def _enrich_peers_with_lixinger(peer_codes: list[str], market: str) -> dict | No
     this_year = datetime.date.today().year
     start_y = this_year - 3  # 确保覆盖最近已出的年报
 
+    # ── v3.13 · 金融业路由正确的 fs 端点 ──
+    _fin_fetchers = {
+        "bank": fetch_bank_fs,
+        "security": fetch_security_fs,
+        "other_financial": fetch_other_financial_fs,
+    }
+    # 保险同行走专用 _enrich_peers_insurance, 不经过此函数
+
+    def _lx_fs(code, mkt):
+        fetcher = _fin_fetchers.get(ftype or "") if ftype else None
+        if fetcher:
+            return fetcher(code, market=mkt, start_year=start_y, end_year=this_year)
+        return lx_nonfin_fs(code, market=mkt, start_year=start_y, end_year=this_year)
+
+    # ── v3.13 · 金融业 ROE 字段 ──
+    if ftype in ("bank", "security", "other_financial"):
+        _roe_keys = ("y.m.wroe.t", "y.m.roe.t")  # A 股用 wroe, HK 用 roe
+    else:
+        _roe_keys = ("y.ps.wroe.t", "y.ps.wdroe.t")
+
     out: dict = {}
     for code in set(peer_codes):
-        raw = lx_fs(code, market=market, start_year=start_y, end_year=this_year)
+        raw = _lx_fs(code, market)
         if not raw or not raw.get("metrics"):
             continue
         m = raw["metrics"]
@@ -81,7 +109,7 @@ def _enrich_peers_with_lixinger(peer_codes: list[str], market: str) -> dict | No
         pe = _val("y.bs.pe_ttm.t")
         pb = _val("y.bs.pb.t")
         ps = _val("y.bs.ps_ttm.t")
-        roe = _val("y.ps.wroe.t")
+        roe = _val(*_roe_keys)
         mcap = _val("y.bs.mc.t")
         gp_m = _val("y.ps.gp_m.t")
         debt_r = _val("y.bs.tl_ta_r.t")
@@ -112,7 +140,7 @@ def _enrich_peers_with_lixinger(peer_codes: list[str], market: str) -> dict | No
     return out if out else None
 
 
-def _enrich_peers_insurance(peer_codes: list[str], ti_code: str) -> dict:
+def _enrich_peers_insurance(peer_codes: list[str], ti_code: str, market: str = "cn") -> dict:
     """保险公司专用 · 逐只查询保费/EV/NBV/偿付能力（理杏仁 insurance 端点）。
 
     Returns:
@@ -176,7 +204,7 @@ def _enrich_peers_insurance(peer_codes: list[str], ti_code: str) -> dict:
                 entry["compsr"] = round(compsr * 100, 1) if compsr < 10 else round(compsr, 1)
 
         # PEV from fundamental endpoint
-        fund = fetch_insurance_fundamental(code, "cn")
+        fund = fetch_insurance_fundamental(code, market)
         if fund and fund.get("pev") is not None:
             entry["pev"] = round(fund["pev"], 2)
 
@@ -270,16 +298,18 @@ def main(ticker: str) -> dict:
         if peer_codes:
             # v3.11 · 按金融子类型路由: 保险→保险端点, 其他金融→标准端点
             ftype = classify_financial_industry(industry) if industry else None
+            # v3.13 · A股→"cn", 港股→"hk"
+            lx_market = "hk" if ti.market == "H" else "cn"
             if ftype == "insurance":
-                lx_peers = _enrich_peers_insurance(peer_codes, ti.code) or {}
+                lx_peers = _enrich_peers_insurance(peer_codes, ti.code, market=lx_market) or {}
                 if lx_peers:
                     source_used += " + lixinger:insurance_peers"
             elif ftype in ("bank", "security", "other_financial"):
-                lx_peers = _enrich_peers_with_lixinger(peer_codes, "cn") or {}
+                lx_peers = _enrich_peers_with_lixinger(peer_codes, lx_market, ftype=ftype) or {}
                 if lx_peers:
                     source_used += f" + lixinger:{ftype}_peers"
             else:
-                lx_peers = _enrich_peers_with_lixinger(peer_codes, "cn") or {}
+                lx_peers = _enrich_peers_with_lixinger(peer_codes, lx_market, ftype=None) or {}
                 if lx_peers:
                     source_used += " + lixinger:peers"
 

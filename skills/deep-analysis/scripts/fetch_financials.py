@@ -109,7 +109,9 @@ def _fetch_via_lixinger(ti, industry: str = "") -> dict | None:
     np_ = _series("y.ps.npatoshopc.t", "y.ps.np.t", div=1e8)
     # API returns ROE as decimal: 0.3253 → 32.53%
     # v3.11 · bank/security 端点 ROE 在 y.m.wroe.t, non_financial 在 y.ps.wroe.t
-    roe_raw = _series("y.ps.wroe.t", "y.ps.wdroe.t", "y.m.wroe.t", is_pct=True)
+    # v3.12→v3.13 · 港股银行/保险/其他金融用 y.m.roe.t (非加权 ROE)
+    # A 股金融业 bank/security 端点用 y.m.wroe.t, non_financial 用 y.ps.wroe.t
+    roe_raw = _series("y.ps.wroe.t", "y.ps.wdroe.t", "y.m.wroe.t", "y.m.roe.t", is_pct=True)
     gpm = _series("y.ps.gp_m.t", is_pct=True)
     # 净利率 = 净利润/营收 (推算, y.m.np_s_r 不可用)
     npm_raw: list[float] = []
