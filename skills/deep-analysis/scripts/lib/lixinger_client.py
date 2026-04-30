@@ -848,7 +848,8 @@ _INSURANCE_FS_METRICS = [
 ]
 
 
-def fetch_insurance_fs(stock_code: str, market: str = "cn") -> dict | None:
+def fetch_insurance_fs(stock_code: str, market: str = "cn",
+                       start_year: int = 2016, end_year: int = 2026) -> dict | None:
     """获取保险业专用财报指标 (保费/赔付/EV/NBV/偿付能力)。
 
     调用 /api/{market}/company/fs/insurance 端点。
@@ -856,13 +857,16 @@ def fetch_insurance_fs(stock_code: str, market: str = "cn") -> dict | None:
     """
     token = _token()
     endpoint = f"{LIXINGER_BASE}/{market}/company/fs/insurance"
+    start_date = f"{start_year}-12-31"
+    end_date   = f"{end_year}-12-31"
     body = {
         "token": token,
         "stockCodes": [stock_code],
-        "date": "latest",
+        "startDate": start_date,
+        "endDate": end_date,
         "metricsList": _INSURANCE_FS_METRICS,
     }
-    cache_key = f"insurance_fs__{market}__{stock_code}"
+    cache_key = f"insurance_fs__{market}__{stock_code}_{start_year}_{end_year}"
     return _cached(cache_key, lambda: _do_fetch(endpoint, body), ttl=24 * 60 * 60)
 
 
@@ -963,21 +967,85 @@ _OTHER_FINANCIAL_FS_METRICS = [
     "y.m.roa.t",               # ROA
 ]
 
+# ── 港股金融业财报指标 ──────────────────────────────────────
+# 港股 API 与 A 股的 metrics 名称不完全兼容：
+#   • 港股没有 y.ps.op.t (营业利润) → 银行用 y.ps.nii.t (净利息收入)
+#   • 港股没有 y.m.wroe.t (加权ROE) → 用 y.m.roe.t
+#   • 保险/证券/其他金融同理，排除 A 股独有指标
+
+_HK_BANK_FS_METRICS = [
+    "y.ps.oi.t",               # 营业收入
+    "y.ps.npatoshopc.t",       # 归母净利润
+    "y.ps.nii.t",              # 净利息收入（港股银行特有）
+    "y.ps.da.t",               # 分红金额
+    "y.ps.d_np_r.t",           # 分红率
+    "y.bs.ta.t",               # 资产总计
+    "y.bs.tl_ta_r.t",          # 资产负债率
+    "y.bs.mc.t",               # 市值
+    "y.bs.pe_ttm.t",           # PE-TTM（估值分位用）
+    "y.bs.pb.t",               # PB（估值分位用）
+    "y.m.roe.t",               # ROE（港股用 m.roe 非 m.wroe）
+    "y.m.np_s_r.t",            # 净利润率
+    "y.m.roa.t",               # ROA
+]
+
+_HK_SECURITY_FS_METRICS = [
+    "y.ps.oi.t",               # 营业收入
+    "y.ps.npatoshopc.t",       # 归母净利润
+    "y.ps.da.t",               # 分红金额
+    "y.ps.d_np_r.t",           # 分红率
+    "y.bs.ta.t",               # 资产总计
+    "y.bs.tl_ta_r.t",          # 资产负债率
+    "y.bs.mc.t",               # 市值
+    "y.bs.pe_ttm.t",           # PE-TTM
+    "y.bs.pb.t",               # PB
+    "y.m.roe.t",               # ROE
+    "y.m.np_s_r.t",            # 净利润率
+    "y.m.roa.t",               # ROA
+]
+
+_HK_OTHER_FINANCIAL_FS_METRICS = [
+    "y.ps.oi.t",               # 营业收入
+    "y.ps.npatoshopc.t",       # 归母净利润
+    "y.ps.da.t",               # 分红金额
+    "y.ps.d_np_r.t",           # 分红率
+    "y.bs.ta.t",               # 资产总计
+    "y.bs.tl_ta_r.t",          # 资产负债率
+    "y.bs.mc.t",               # 市值
+    "y.bs.pe_ttm.t",           # PE-TTM
+    "y.bs.pb.t",               # PB
+    "y.m.roe.t",               # ROE
+    "y.m.np_s_r.t",            # 净利润率
+    "y.m.roa.t",               # ROA
+]
+
 
 def _fetch_financial_fs(stock_code: str, market: str, ftype: str,
                         start_year: int, end_year: int) -> dict | None:
-    """金融业财报通用获取器 —— 根据 ftype 选择端点和指标集。"""
+    """金融业财报通用获取器 —— 根据 ftype 选择端点和指标集。
+
+    A 股与港股使用不同的 metrics 列表（港股 API 不支持 y.ps.op.t / y.m.wroe.t）。
+    """
     token = _token()
     endpoint = "{}/{}/company/fs/{}".format(LIXINGER_BASE, market, ftype)
     start_date = "{}-12-31".format(start_year)
     end_date = "{}-12-31".format(end_year)
 
-    metrics_map = {
-        "bank": _BANK_FS_METRICS,
-        "security": _SECURITY_FS_METRICS,
-        "other_financial": _OTHER_FINANCIAL_FS_METRICS,
-    }
-    metrics = metrics_map.get(ftype, _OTHER_FINANCIAL_FS_METRICS)
+    # cn (A股) 与 hk (港股) 使用不同的指标列表
+    is_hk = (market == "hk")
+    if is_hk:
+        metrics_map = {
+            "bank": _HK_BANK_FS_METRICS,
+            "security": _HK_SECURITY_FS_METRICS,
+            "other_financial": _HK_OTHER_FINANCIAL_FS_METRICS,
+        }
+    else:
+        metrics_map = {
+            "bank": _BANK_FS_METRICS,
+            "security": _SECURITY_FS_METRICS,
+            "other_financial": _OTHER_FINANCIAL_FS_METRICS,
+        }
+    metrics = metrics_map.get(ftype, _HK_OTHER_FINANCIAL_FS_METRICS if is_hk else _OTHER_FINANCIAL_FS_METRICS)
 
     body = {
         "token": token,
