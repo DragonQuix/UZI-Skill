@@ -26,6 +26,13 @@ skills/deep-analysis/.cache/
 Thumbs.db
 desktop.ini
 
+# Claude Code local state (auto-generated, session history)
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+
+# Claude Code agent worktrees (isolated copies, not source)
+.claude/worktrees/
+
 # Debug / temp scripts (per-ticket, not for distribution)
 skills/deep-analysis/scripts/_*.py
 
