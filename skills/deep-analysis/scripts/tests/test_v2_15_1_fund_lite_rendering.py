@@ -179,3 +179,88 @@ def test_moat_filter_allows_target_is_polluter():
         "url": "https://x.com/y"
     }
     assert _result_mentions_company(result, "贵州茅台", polluters_without_self) is True
+
+
+def test_moat_filter_rejects_generic_suffix_token_matches():
+    """公司名后缀/泛化词不能作为相关性证据."""
+    from fetch_moat import _result_mentions_company
+
+    cases = [
+        (
+            {"title": "某某控股核心技术领先", "body": "某某控股持续加大研发投入", "url": "https://x.com/1"},
+            "中密控股",
+        ),
+        (
+            {"title": "华发股份市场份额提升", "body": "华发股份行业地位改善", "url": "https://x.com/2"},
+            "万科股份",
+        ),
+        (
+            {"title": "中国移动网络效应增强", "body": "中国移动用户生态继续扩大", "url": "https://x.com/3"},
+            "中国平安",
+        ),
+    ]
+    for result, target in cases:
+        assert _result_mentions_company(result, target, set()) is False
+
+
+def test_moat_main_keeps_general_result_when_trusted_is_polluted(monkeypatch):
+    """trusted 足量但全污染时，普通 search 里的正确目标公司结果仍要保留."""
+    import fetch_moat
+
+    monkeypatch.setattr(
+        fetch_moat.ds,
+        "fetch_basic",
+        lambda ti: {"code": ti.full, "name": "中密控股", "full_name": "中密控股股份有限公司"},
+    )
+    trusted = [
+        {"title": "某某控股核心技术领先", "body": "某某控股持续加大研发投入", "url": "https://trusted.test/1"},
+        {"title": "华发股份市场份额提升", "body": "华发股份行业地位改善", "url": "https://trusted.test/2"},
+        {"title": "中国移动网络效应增强", "body": "中国移动用户生态继续扩大", "url": "https://trusted.test/3"},
+    ]
+    general = [
+        {
+            "title": "中密控股核心技术持续领先",
+            "body": "中密控股在机械密封件市场份额领先，具备核心技术和认证壁垒。",
+            "url": "https://general.test/ok",
+        }
+    ]
+    monkeypatch.setattr(fetch_moat, "search_trusted", lambda *args, **kwargs: list(trusted))
+    monkeypatch.setattr(fetch_moat, "search", lambda *args, **kwargs: list(general))
+
+    out = fetch_moat.main("300470.SZ")
+    snippets = out["data"]["web_search_snippets"]["intangible"]
+
+    assert any("中密控股" in (s["title"] + s["body"]) for s in snippets)
+    assert all("某某控股" not in (s["title"] + s["body"]) for s in snippets)
+
+
+def test_moat_main_does_not_fallback_to_unverified_results(monkeypatch):
+    """trusted/general 都无目标公司相关结果时，不回退污染片段，评分保持中性 5."""
+    import fetch_moat
+
+    monkeypatch.setattr(
+        fetch_moat.ds,
+        "fetch_basic",
+        lambda ti: {"code": ti.full, "name": "中密控股", "full_name": "中密控股股份有限公司"},
+    )
+    trusted = [
+        {"title": "某某控股核心技术领先", "body": "某某控股研发投入提升", "url": "https://trusted.test/1"},
+        {"title": "华发股份市场份额提升", "body": "华发股份成为行业龙头", "url": "https://trusted.test/2"},
+        {"title": "中国移动网络效应增强", "body": "中国移动平台生态扩大", "url": "https://trusted.test/3"},
+    ]
+    general = [
+        {"title": "贵州茅台品牌壁垒突出", "body": "贵州茅台具备强品牌和规模优势", "url": "https://general.test/1"}
+    ]
+    monkeypatch.setattr(fetch_moat, "search_trusted", lambda *args, **kwargs: list(trusted))
+    monkeypatch.setattr(fetch_moat, "search", lambda *args, **kwargs: list(general))
+
+    out = fetch_moat.main("300470.SZ")
+
+    assert out["data"]["web_search_snippets"]["intangible"] == []
+    assert out["data"]["web_search_snippets"]["scale"] == []
+    assert out["data"]["scores"] == {
+        "intangible": 5,
+        "switching": 5,
+        "network": 5,
+        "scale": 5,
+    }

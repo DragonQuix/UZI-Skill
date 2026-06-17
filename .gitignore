@@ -47,6 +47,8 @@ docs/screenshots/full-page.png
 # Local-only drafts (not for remote)
 docs/wechat-article.md
 docs/*.local.md
+中海油投资价值深度研究_*.md
+skills/deep-analysis/scripts/dim_3_13_macro_policy_analysis.json
 
 # v2.10.2 · prewarm_cache 生成的预热数据（release 附件，不进 repo）
 skills/deep-analysis/scripts/prewarm/
