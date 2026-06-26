@@ -72,6 +72,7 @@ UZI-Skill/                                  # ← 你 cwd 应该是这里
 | v3.0.0 | pipeline 默认启用 · `UZI_LEGACY=1` 回老路径 | `python run.py` 默认进 pipeline |
 | v3.1.0 | rrt 瘦身 65% · 纯函数搬到 score_fns | 所有 `rrt.XXX` 仍向后兼容 (re-export) |
 | v3.2.0 | assemble_report 瘦身 80% · 拆 5 个 lib/report/* | 所有 `assemble_report.XXX` 仍向后兼容 |
+| v3.13.0 | fetch_moat 搜索相关性收紧 · 公司名别名剥离 + 股票代码边界匹配 + trusted/general 合并后再过滤 | DDGS 对生僻公司返超级股票污染被有效过滤；sh 用 `python fetch_moat.py <ticker>` 影响可见 |
 
 **黄金规则**：外部 test / lib 仍可以 `import run_real_test; rrt.score_dimensions(...)` · 不用改。拆分对上层透明.
 
