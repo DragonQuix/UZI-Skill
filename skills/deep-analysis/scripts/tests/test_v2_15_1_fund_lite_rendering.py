@@ -264,3 +264,69 @@ def test_moat_main_does_not_fallback_to_unverified_results(monkeypatch):
         "network": 5,
         "scale": 5,
     }
+
+
+def test_moat_main_filters_general_noise_when_trusted_clean(monkeypatch):
+    """trusted 干净足量时，general 里的低质 / 非目标公司结果不应混入。
+
+    对抗 v3.13 回退策略改动（始终合并 general）的回归盲点：原本 `res_t >= 3`
+    时只用 trusted，现在两条链路都合并，若 general 返回竞争对手 / 行业杂讯，
+    仍需靠 _result_mentions_company 过滤掉。
+    """
+    import fetch_moat
+
+    monkeypatch.setattr(
+        fetch_moat.ds,
+        "fetch_basic",
+        lambda ti: {"code": ti.full, "name": "中密控股", "full_name": "中密控股股份有限公司"},
+    )
+    # trusted 干净、命中目标公司，且明显非 garbage（不含"拼音/汉语"等字典模式）
+    trusted = [
+        {
+            "title": "中密控股：机械密封件龙头份额持续领先",
+            "body": "中密控股在核电密封件领域份额领先，具备核心技术和认证壁垒。",
+            "url": "https://trusted.test/ok1",
+        },
+        {
+            "title": "中密控股年报解读：研发投入加大",
+            "body": "中密控股研发投入持续提升，认证壁垒带动客户粘性增强。",
+            "url": "https://trusted.test/ok2",
+        },
+        {
+            "title": "中密控股市场份额再创新高",
+            "body": "中密控股行业地位稳固，规模优势明显。",
+            "url": "https://trusted.test/ok3",
+        },
+    ]
+    # general 里返的是竞争对手 / 杂讯：不含目标公司名、不含 polluter
+    general = [
+        {
+            "title": "丹东克隆机械密封市场扩张",
+            "body": "丹东克隆在机械密封件市场份额提升，行业竞争加剧。",
+            "url": "https://general.test/noise1",
+        },
+        {
+            "title": "创业板指数上涨 2%",
+            "body": "今日大盘继续震荡，机械板块活跃。",
+            "url": "https://general.test/noise2",
+        },
+    ]
+    monkeypatch.setattr(fetch_moat, "search_trusted", lambda *args, **kwargs: list(trusted))
+    monkeypatch.setattr(fetch_moat, "search", lambda *args, **kwargs: list(general))
+
+    out = fetch_moat.main("300470.SZ")
+
+    intangible_snippets = out["data"]["web_search_snippets"]["intangible"]
+    scale_snippets = out["data"]["web_search_snippets"]["scale"]
+
+    # general 里的杂讯、竞争对手片段必须全部被过滤掉
+    all_snippets = intangible_snippets + scale_snippets
+    assert all("丹东克隆" not in (s["title"] + s["body"]) for s in all_snippets)
+    assert all("创业板指数" not in (s["title"] + s["body"]) for s in all_snippets)
+    # trusted 的目标公司结果保留，snippet 不应为空
+    assert any("中密控股" in (s["title"] + s["body"]) for s in all_snippets)
+    # 因任务返回多个 key，至少 intangible 或 scale 之一非空（trusted 含正向证据）
+    assert (
+        out["data"]["web_search_snippets"]["intangible"]
+        or out["data"]["web_search_snippets"]["scale"]
+    )

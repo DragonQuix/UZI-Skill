@@ -73,7 +73,17 @@ def _is_effective_company_alias(alias: str) -> bool:
 
 
 def _company_aliases(company_name: str, full_name: str = "") -> list[str]:
-    """Generate precise company aliases without using generic suffix tokens."""
+    """Generate precise company aliases without using generic suffix tokens.
+
+    策略假设与风险（评审 P3）：
+    - 只剥离 _COMPANY_SUFFIXES 中显式枚举的后缀；不剥核心字号（如"中密"）。
+    - _GENERIC_COMPANY_TOKENS 只过滤完整等值匹配，不防"剥后剩余恰好等于另一公司简称"
+      的偶发误命中（如目标"中密控股"对"中密..."型片段会被算命中，但此类片段若
+      非完整别名一般不会出现在严肃财经文本里）。
+    - 对以"国际" / "投资" / "科技"为根的极少数公司，剥离可能过深 → 上层调用方
+      需把 full_name 一起传入以提供更多候选别名兜底。
+    - 不处理 A 股/港股代码差异；股票代码匹配由 _mentions_stock_code 单独负责。
+    """
     aliases: list[str] = []
     seen: set[str] = set()
 
