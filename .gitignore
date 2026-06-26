@@ -29,6 +29,9 @@ desktop.ini
 # Claude Code local state (auto-generated, session history)
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+# (前瞻通配) 任何带 .local 后缀的会话命令白名单 / 锁文件，避免未来新形态流入仓库
+/.claude/*.local.json
+/.claude/*.lock
 
 # Claude Code agent worktrees (isolated copies, not source)
 .claude/worktrees/
@@ -47,8 +50,8 @@ docs/screenshots/full-page.png
 # Local-only drafts (not for remote)
 docs/wechat-article.md
 docs/*.local.md
-中海油投资价值深度研究_*.md
-skills/deep-analysis/scripts/dim_3_13_macro_policy_analysis.json
+# 个人草稿 / 单次跑数据文件已迁移到 .git/info/exclude（本地、不推送）
+# 评审 P2-2：原硬编码公司名 + 单一数据文件路径污染共享 .gitignore
 
 # v2.10.2 · prewarm_cache 生成的预热数据（release 附件，不进 repo）
 skills/deep-analysis/scripts/prewarm/
