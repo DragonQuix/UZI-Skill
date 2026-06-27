@@ -149,6 +149,17 @@ def test_render_war_report_has_main():
     assert "def main" in content, "BUG regression: render_war_report.py 必须导出 main"
 
 
+# ─── BUG (v3.13) · 全负 PE 历史不能生成负高度 SVG ──
+def test_svg_pe_band_negative_pe_heights_non_negative():
+    import re
+    from lib.report.svg_primitives import svg_pe_band
+
+    svg = svg_pe_band([-80, -20], width=320, height=160)
+    heights = [float(v) for v in re.findall(r'height="(-?\d+(?:\.\d+)?)"', svg)]
+    assert heights, "svg_pe_band 应输出 rect height"
+    assert min(heights) >= 0, "BUG regression: 全负 PE 历史不应生成负 rect height"
+
+
 # ─── BUG (v2.5) · HK 主链路必须独立 try/except ──
 def test_hk_branches_isolated():
     """fetch_peers/capital_flow/events 的 HK 分支必须独立 try/except 不污染 A 股"""

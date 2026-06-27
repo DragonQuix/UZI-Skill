@@ -396,21 +396,31 @@ def svg_pe_band(pe_history: list, bands: dict = None, width: int = 300, height: 
     p25 = sorted_pe[int(n * 0.25)]
     p50 = sorted_pe[int(n * 0.5)]
     p75 = sorted_pe[int(n * 0.75)]
-    y_max = max(pe_history) * 1.05
-    y_min = min(pe_history) * 0.95
+    raw_min = min(pe_history)
+    raw_max = max(pe_history)
+    raw_span = max(raw_max - raw_min, abs(raw_max) * 0.05, abs(raw_min) * 0.05, 1e-9)
+    y_max = raw_max + raw_span * 0.05
+    y_min = raw_min - raw_span * 0.05
     span = max(y_max - y_min, 1e-9)
 
     def y_of(v):
-        return pad_t + h - (v - y_min) / span * h
+        y = pad_t + h - (v - y_min) / span * h
+        return max(pad_t, min(pad_t + h, y))
 
     # bands (percentile horizontal strips)
     y25 = y_of(p25)
     y50 = y_of(p50)
     y75 = y_of(p75)
+    band_bottom = pad_t + h
+    y25_band = max(pad_t, min(band_bottom, y25))
+    y75_band = max(pad_t, min(band_bottom, y75))
+    red_h = max(0, y75_band - pad_t)
+    yellow_h = max(0, y25_band - y75_band)
+    green_h = max(0, band_bottom - y25_band)
     bands_svg = f'''
-  <rect x="{pad_l}" y="{pad_t}" width="{w}" height="{y75-pad_t:.1f}" fill="#fee2e2" opacity="0.5"/>
-  <rect x="{pad_l}" y="{y75:.1f}" width="{w}" height="{y25-y75:.1f}" fill="#fef3c7" opacity="0.5"/>
-  <rect x="{pad_l}" y="{y25:.1f}" width="{w}" height="{pad_t+h-y25:.1f}" fill="#d1fae5" opacity="0.5"/>
+  <rect x="{pad_l}" y="{pad_t}" width="{w}" height="{red_h:.1f}" fill="#fee2e2" opacity="0.5"/>
+  <rect x="{pad_l}" y="{y75_band:.1f}" width="{w}" height="{yellow_h:.1f}" fill="#fef3c7" opacity="0.5"/>
+  <rect x="{pad_l}" y="{y25_band:.1f}" width="{w}" height="{green_h:.1f}" fill="#d1fae5" opacity="0.5"/>
   <line x1="{pad_l}" y1="{y25:.1f}" x2="{pad_l+w}" y2="{y25:.1f}" stroke="#059669" stroke-width="1" stroke-dasharray="3,3"/>
   <line x1="{pad_l}" y1="{y50:.1f}" x2="{pad_l+w}" y2="{y50:.1f}" stroke="#64748b" stroke-width="1" stroke-dasharray="3,3"/>
   <line x1="{pad_l}" y1="{y75:.1f}" x2="{pad_l+w}" y2="{y75:.1f}" stroke="#dc2626" stroke-width="1" stroke-dasharray="3,3"/>
